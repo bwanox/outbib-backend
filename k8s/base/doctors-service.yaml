@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: doctors-service
+  namespace: outbib
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: doctors-service
+  template:
+    metadata:
+      labels:
+        app: doctors-service
+    spec:
+      containers:
+        - name: doctors-service
+          image: outbib-doctors-service:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: outbib-config
+            - secretRef:
+                name: outbib-secrets
+          env:
+            - name: PORT
+              value: "3000"
+            - name: DATABASE_URL
+              value: "postgresql://outbib:outbib@postgres:5432/outbib_doctors"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: doctors-service
+  namespace: outbib
+spec:
+  selector:
+    app: doctors-service
+  ports:
+    - port: 3000
+      targetPort: 3000
+  type: ClusterIP
