@@ -1,17 +1,12 @@
-import { Controller, Get } from "@nestjs/common";
-import { AppService } from "./app.service";
+import { Controller, Post, Body } from '@nestjs/common';
+import { AiService, ChatMessage } from './ai.service';
 
-@Controller()
+@Controller('ai')
 export class AppController {
-  constructor(private readonly appService: AppService) {}
+  constructor(private readonly aiService: AiService) {}
 
-  @Get()
-  getHello(): string {
-    return this.appService.getHello();
-  }
-
-  @Get("health")
-  health() {
-    return { status: "ok" };
+  @Post('chat')
+  async chat(@Body('messages') messages: ChatMessage[]) {
+    return this.aiService.getMedicalAdvice(messages);
   }
 }
