@@ -6,3 +6,4 @@ metadata:
 data:
   NODE_ENV: "development"
   REDIS_URL: "redis://redis:6379"
+  NATS_URL: "nats://nats:4222"

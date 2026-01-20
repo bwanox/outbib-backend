@@ -41,6 +41,7 @@ kubectl apply -f k8s/base/configmap.yaml
 kubectl apply -f k8s/base/secrets.yaml
 kubectl apply -f k8s/base/postgres.yaml
 kubectl apply -f k8s/base/redis.yaml
+kubectl apply -f k8s/base/nats.yaml
 
 kubectl apply -f k8s/base/auth-service.yaml
 kubectl apply -f k8s/base/users-service.yaml

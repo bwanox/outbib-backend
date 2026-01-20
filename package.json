@@ -1,0 +1,14 @@
+{
+  "name": "outbib-backend",
+  "private": true,
+  "packageManager": "npm@11.4.1",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm -ws run build",
+    "lint": "npm -ws run lint",
+    "test": "npm -ws run test"
+  }
+}

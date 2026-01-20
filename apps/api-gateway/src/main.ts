@@ -1,6 +1,8 @@
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module";
 import { createProxyMiddleware } from "http-proxy-middleware";
+import { ValidationPipe } from '@nestjs/common';
+import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
 function env(name: string, fallback: string) {
   return process.env[name] || fallback;
@@ -8,6 +10,15 @@ function env(name: string, fallback: string) {
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  app.useGlobalFilters(new HttpExceptionFilter());
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      forbidNonWhitelisted: true,
+    }),
+  );
 
   const AUTH_URL = env("AUTH_URL", "http://auth-service:3000");
   const USERS_URL = env("USERS_URL", "http://users-service:3000");
@@ -20,14 +31,33 @@ async function bootstrap() {
   // Health endpoint for probes
   app.getHttpAdapter().get("/health", (_req: any, res: any) => res.json({ status: "ok" }));
 
+  const proxyErrorHandler = (serviceName: string) => (err: any, req: any, res: any) => {
+    const statusCode = 502;
+    res.status(statusCode).json({
+      statusCode,
+      message: `Bad gateway: ${serviceName} unavailable`,
+      error: 'BadGateway',
+      path: req.originalUrl || req.url,
+      timestamp: new Date().toISOString(),
+    });
+  };
+
+  const proxyOptions = (target: string, basePath: string, serviceName: string) =>
+    ({
+      target,
+      changeOrigin: true,
+      pathRewrite: { [`^/${basePath}`]: '' },
+      onError: proxyErrorHandler(serviceName),
+    }) as any;
+
   // Proxy routes
-  app.use("/auth", createProxyMiddleware({ target: AUTH_URL, changeOrigin: true, pathRewrite: { "^/auth": "" } }));
-  app.use("/users", createProxyMiddleware({ target: USERS_URL, changeOrigin: true, pathRewrite: { "^/users": "" } }));
-  app.use("/doctors", createProxyMiddleware({ target: DOCTORS_URL, changeOrigin: true, pathRewrite: { "^/doctors": "" } }));
-  app.use("/pharmacies", createProxyMiddleware({ target: PHARMACIES_URL, changeOrigin: true, pathRewrite: { "^/pharmacies": "" } }));
-  app.use("/reminders", createProxyMiddleware({ target: REMINDERS_URL, changeOrigin: true, pathRewrite: { "^/reminders": "" } }));
-  app.use("/emergencies", createProxyMiddleware({ target: EMERGENCIES_URL, changeOrigin: true, pathRewrite: { "^/emergencies": "" } }));
-  app.use("/ai", createProxyMiddleware({ target: AI_URL, changeOrigin: true, pathRewrite: { "^/ai": "" } }));
+  app.use('/auth', createProxyMiddleware(proxyOptions(AUTH_URL, 'auth', 'auth-service')));
+  app.use('/users', createProxyMiddleware(proxyOptions(USERS_URL, 'users', 'users-service')));
+  app.use('/doctors', createProxyMiddleware(proxyOptions(DOCTORS_URL, 'doctors', 'doctors-service')));
+  app.use('/pharmacies', createProxyMiddleware(proxyOptions(PHARMACIES_URL, 'pharmacies', 'pharmacies-service')));
+  app.use('/reminders', createProxyMiddleware(proxyOptions(REMINDERS_URL, 'reminders', 'reminders-service')));
+  app.use('/emergencies', createProxyMiddleware(proxyOptions(EMERGENCIES_URL, 'emergencies', 'emergencies-service')));
+  app.use('/ai', createProxyMiddleware(proxyOptions(AI_URL, 'ai', 'ai-service')));
 
   const port = process.env.PORT || "3000";
   await app.listen(port);

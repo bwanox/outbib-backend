@@ -1,98 +1,302 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Outbib Auth Service
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+NestJS microservice responsible for authentication, authorization (role-based access), and user account status management.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+- **Language/Framework**: Node.js + NestJS
+- **Database**: PostgreSQL (via Prisma)
+- **Auth**: JWT access tokens + rotating JWT refresh tokens
+- **Async events**: NATS (optional; can be disabled)
+- **Docs**: Swagger UI at `/docs`
 
-## Description
+## How it works (architecture & flow)
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+### Main building blocks
 
-## Project setup
+- **HTTP layer**: `src/auth/auth.controller.ts`
+  - Exposes `/auth/*` endpoints.
+  - Uses NestJS validation (`ValidationPipe`) to validate DTOs.
 
-```bash
-$ npm install
-```
+- **Business logic**: `src/auth/auth.service.ts`
+  - Handles register/login/refresh/logout/me.
+  - Handles admin actions (set role / disable user).
 
-## Compile and run the project
+- **Database access**: `src/prisma/prisma.service.ts`
+  - Wraps Prisma client and connects on module init.
+  - Uses `DATABASE_URL` to reach Postgres.
 
-```bash
-# development
-$ npm run start
+- **Security**
+  - `src/auth/guards/jwt-auth.guard.ts`: verifies `Authorization: Bearer <token>` using `JWT_SECRET` and sets `req.user`.
+  - `src/auth/guards/roles.guard.ts`: enforces roles using metadata from `src/auth/roles.decorator.ts`.
 
-# watch mode
-$ npm run start:dev
+- **Event publishing**: `src/events/auth-events.publisher.ts`
+  - After key changes, publishes events to NATS (`AuthUserRegisteredV1`, `AuthUserRoleUpdatedV1`, `AuthUserDisabledV1`).
+  - If `NATS_DISABLED=true`, publishing is skipped so the service can run without NATS (useful for local dev).
 
-# production mode
-$ npm run start:prod
-```
+### Auth flows
 
-## Run tests
+- **Register** (`POST /auth/register`)
+  1. Email is normalized to lowercase.
+  2. Password is bcrypt-hashed.
+  3. User is created with default `role=user`, `status=active`.
+  4. `AuthUserRegisteredV1` event is published (unless NATS is disabled).
 
-```bash
-# unit tests
-$ npm run test
+- **Login** (`POST /auth/login`)
+  1. Email is normalized to lowercase.
+  2. Password is verified via bcrypt.
+  3. If `status=disabled`, login is rejected.
+  4. Issues **access token** (15m) + **refresh token** (default 7d).
+  5. Stores a bcrypt hash of the refresh token in DB (`refreshTokenHash`).
 
-# e2e tests
-$ npm run test:e2e
+- **Refresh** (`POST /auth/refresh`)
+  1. Refresh token is verified with `JWT_REFRESH_SECRET` (fallback: `JWT_SECRET`).
+  2. Refresh token is compared against the stored bcrypt hash.
+  3. Issues a **new access token and a new refresh token** (rotation).
+  4. Replaces `refreshTokenHash` with the new token hash.
 
-# test coverage
-$ npm run test:cov
-```
+- **Logout** (`POST /auth/logout`)
+  - Best-effort: verifies the refresh token; if valid, clears `refreshTokenHash` in DB.
 
-## Deployment
+- **Admin actions**
+  - Protected by **JWT + role**.
+  - `PATCH /auth/admin/users/:id/role`: updates role and publishes `AuthUserRoleUpdatedV1`.
+  - `PATCH /auth/admin/users/:id/disable`: sets `status=disabled` and publishes `AuthUserDisabledV1`.
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+## Quick start
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+### Run with Docker Compose (recommended)
+This repo’s `docker-compose.yml` starts Postgres + this service.
 
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
-```
+- Service: `http://localhost:3000`
+- Swagger UI: `http://localhost:3000/docs`
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+Auth-service compose env (from `outbib-backend/docker-compose.yml`):
 
-## Resources
+- `PORT=3000`
+- `DATABASE_URL=postgresql://outbib:outbib@postgres:5432/outbib_auth`
+- `NATS_DISABLED=true`
 
-Check out a few resources that may come in handy when working with NestJS:
+> Note: compose also mounts `./docker/postgres/init` into Postgres for initialization scripts.
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+### Run locally (without Docker)
 
-## Support
+1. Ensure Postgres is running and create a database for auth (example: `outbib_auth`).
+2. Set environment variables (see below).
+3. Install deps and run:
+   - `npm install`
+   - `npm -w auth-service run prisma:generate`
+   - `npm -w auth-service run prisma:migrate:deploy`
+   - `npm -w auth-service run start:dev`
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+## Running in Docker
 
-## Stay in touch
+### What Docker Compose does
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+In `outbib-backend/docker-compose.yml`:
 
-## License
+- **Postgres** container
+  - Exposes `5432:5432`
+  - Persists data in the named volume `postgres_data`
+  - Runs init scripts from `./docker/postgres/init` (mounted read-only)
+  - Has a `pg_isready` healthcheck
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+- **auth-service** container
+  - Built from `apps/auth-service/Dockerfile`
+  - Waits for Postgres to become healthy (`depends_on` with `service_healthy`)
+  - Runs the compiled NestJS app (`node dist/main.js` via the Dockerfile `CMD`)
+  - Uses `DATABASE_URL` to reach the `postgres` service over the Docker network
+
+### Important note: migrations
+
+Docker Compose does **not** run Prisma migrations automatically for auth-service.
+
+If you are using Compose and the schema isn’t applied yet, run migrations against the running container (or run them locally targeting the compose Postgres). This project uses:
+
+- `npm -w auth-service run prisma:migrate:deploy`
+
+## Running in Kubernetes (k8s)
+
+Kubernetes manifests live under `outbib-backend/k8s/base/`.
+
+### auth-service deployment
+
+File: `k8s/base/auth-service.yaml`
+
+- Uses an **initContainer** named `migrate` to run DB migrations before the application starts:
+  - `npm -w auth-service run prisma:migrate:deploy`
+- Then starts the app container (`auth-service`) on port `3000`.
+- Loads configuration from:
+  - ConfigMap: `outbib-config` (`k8s/base/configmap.yaml`) → provides `NODE_ENV`, `NATS_URL`, etc.
+  - Secret: `outbib-secrets` (not in this repo snippet) → expected to provide sensitive values like JWT secrets.
+- Sets `DATABASE_URL` for auth DB: `postgresql://outbib:outbib@postgres:5432/outbib_auth`
+
+### Probes (readiness/liveness)
+
+`k8s/base/auth-service.yaml` probes `/health`.
+
+If `/health` is not implemented in this service, probes will fail and Kubernetes will keep restarting the pod. In that case you have two options:
+
+1. Implement a `GET /health` endpoint in auth-service, or
+2. Adjust probes to a valid path (or remove probes).
+
+### admin bootstrap job
+
+File: `k8s/base/auth-admin-bootstrap-job.yaml`
+
+- Runs migrations via an initContainer (same as the deployment).
+- Then runs the bootstrap script:
+  - `node dist/auth/bootstrap-admin-job.js`
+- This job relies on env vars like `AUTH_ADMIN_EMAIL` and `AUTH_ADMIN_PASSWORD`.
+
+## Configuration
+
+### Environment variables
+
+| Variable | Required | Default | Description |
+|---|---:|---|---|
+| `NODE_ENV` | no | `development` | Node environment. |
+| `PORT` | no | `3000` | HTTP port the service listens on. |
+| `DATABASE_URL` | yes | — | PostgreSQL connection string used by Prisma. |
+| `JWT_SECRET` | no | `dev-secret` | Secret used to sign/verify **access tokens**. |
+| `JWT_REFRESH_SECRET` | no | `JWT_SECRET` / `dev-secret` | Secret used to sign/verify **refresh tokens**. Strongly recommended to set separately in production. |
+| `JWT_REFRESH_EXPIRES_IN` | no | `7d` | Refresh token TTL (`jsonwebtoken` format). |
+| `NATS_DISABLED` | no | `false` | If `true`, event publishing is skipped (auth still works). |
+| `NATS_URL` | no | `nats://nats:4222` | NATS server URL. Ignored when `NATS_DISABLED=true`. |
+| `AUTH_ADMIN_BOOTSTRAP_ENABLED` | no | `true` | Enables the admin bootstrap job. |
+| `AUTH_ADMIN_EMAIL` | sometimes | — | Admin bootstrap email (required to create/promote admin). |
+| `AUTH_ADMIN_PASSWORD` | sometimes | — | Admin bootstrap password (>= 12 chars incl. upper/lower/number/symbol). |
+| `AUTH_ADMIN_PROMOTE_EXISTING` | no | `false` | If `true`, an existing non-admin user with `AUTH_ADMIN_EMAIL` is promoted to admin. |
+
+### Token behavior
+
+- **Access token**: signed with `JWT_SECRET`, expires in **15m** (see `JwtModule.register` in `src/auth/auth.module.ts`).
+- **Refresh token**:
+  - signed with `JWT_REFRESH_SECRET` (or `JWT_SECRET` fallback)
+  - expiry controlled by `JWT_REFRESH_EXPIRES_IN` (default `7d`)
+  - is **rotated** on every successful `POST /auth/refresh`
+  - only a **bcrypt hash** is stored in DB (`User.refreshTokenHash`)
+
+## Database (Prisma)
+
+- Prisma schema: `prisma/schema.prisma`
+- Main model: `User`
+  - `email` unique
+  - `role`: `user` (default) or `admin` (set via admin endpoint/job)
+  - `status`: `active` (default) or `disabled`
+  - `passwordHash`: bcrypt hash
+  - `refreshTokenHash`: bcrypt hash (nullable)
+
+### Prisma scripts
+
+From `apps/auth-service/package.json`:
+
+- `prisma:generate`: generate Prisma client
+- `prisma:migrate:deploy`: apply migrations
+- `prisma:migrate:status`: show migration status
+
+## Events (NATS)
+
+Publishing is implemented in `src/events/auth-events.publisher.ts` and uses `src/events/nats-connection.ts`.
+
+If `NATS_DISABLED=true`, the publisher will silently skip publishing.
+
+Published event names come from `@outbib/contracts`:
+
+- `EventNames.AuthUserRegisteredV1`
+- `EventNames.AuthUserRoleUpdatedV1`
+- `EventNames.AuthUserDisabledV1`
+
+## Admin bootstrap job
+
+File: `src/auth/bootstrap-admin-job.ts` (compiled to `dist/auth/bootstrap-admin-job.js`).
+
+Run after build:
+
+- Script: `npm -w auth-service run bootstrap:admin`
+
+Behavior:
+
+- If `AUTH_ADMIN_EMAIL` and `AUTH_ADMIN_PASSWORD` are set:
+  - creates an admin user if it doesn’t exist
+  - optionally promotes an existing user when `AUTH_ADMIN_PROMOTE_EXISTING=true`
+- Enforces password strength (>= 12 chars, includes upper/lower/number/symbol).
+
+## API
+
+Base path: `/auth`
+
+### Swagger
+
+- UI: `GET /docs`
+
+### Authentication
+
+Protected endpoints require:
+
+- `Authorization: Bearer <accessToken>`
+
+### Endpoints
+
+#### Register
+- **POST** `/auth/register`
+- Auth: no
+- Body: `RegisterRequestDto` (`email`, `password`)
+- Response: `MeResponseDto`
+
+#### Login
+- **POST** `/auth/login`
+- Auth: no
+- Body: `LoginRequestDto` (`email`, `password`)
+- Response: `AuthTokensDto` (`accessToken`, `refreshToken`)
+
+#### Refresh tokens (rotate)
+- **POST** `/auth/refresh`
+- Auth: no
+- Body: `RefreshRequestDto` (`refreshToken`)
+- Response: `AuthTokensDto` (`accessToken`, `refreshToken`)
+
+#### Logout
+- **POST** `/auth/logout`
+- Auth: no
+- Body: `LogoutRequestDto` (`refreshToken`)
+- Response: `{ "status": "ok" }`
+
+#### Get current user
+- **GET** `/auth/me`
+- Auth: Bearer access token
+- Response: `MeResponseDto`
+
+#### Admin: set user role
+- **PATCH** `/auth/admin/users/:id/role`
+- Auth: Bearer access token + role `admin`
+- Body: `SetRoleRequestDto` (`role`: `user` | `admin`)
+- Response: `MeResponseDto`
+
+#### Admin: disable user
+- **PATCH** `/auth/admin/users/:id/disable`
+- Auth: Bearer access token + role `admin`
+- Body: `DisableUserRequestDto` (currently empty DTO)
+- Response: `MeResponseDto`
+
+## HTTP error handling
+
+A global exception filter is registered in `src/main.ts` (`HttpExceptionFilter`). Validation uses a global `ValidationPipe` with:
+
+- `whitelist: true`
+- `forbidNonWhitelisted: true`
+- `transform: true`
+
+## Repo notes / implementation pointers
+
+- Controllers: `src/auth/auth.controller.ts`
+- Business logic: `src/auth/auth.service.ts`
+- Guards:
+  - JWT: `src/auth/guards/jwt-auth.guard.ts`
+  - Roles: `src/auth/guards/roles.guard.ts`
+- Role decorator: `src/auth/roles.decorator.ts`
+
+## Docker
+
+The service Docker image is built by `apps/auth-service/Dockerfile`.
+
+- Build stage compiles NestJS + generates Prisma client.
+- Runtime stage installs production deps and copies `dist/` + Prisma artifacts.
