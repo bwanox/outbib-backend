@@ -33,5 +33,38 @@ services:
       postgres:
         condition: service_healthy
 
+  users-service:
+    build:
+      context: .
+      dockerfile: apps/users-service/Dockerfile
+    container_name: outbib-users-service
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: postgresql://outbib:outbib@postgres:5432/outbib_users
+      JWT_SECRET: ${JWT_SECRET:-dev-secret}
+      NATS_DISABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: apps/api-gateway/Dockerfile
+    container_name: outbib-api-gateway
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      AUTH_URL: http://auth-service:3000
+      USERS_URL: http://users-service:3000
+    ports:
+      - "8080:3000"
+    depends_on:
+      auth-service:
+        condition: service_started
+      users-service:
+        condition: service_started
+
 volumes:
   postgres_data:

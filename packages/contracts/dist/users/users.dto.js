@@ -36,6 +36,8 @@ class UserMeResponseDto {
     email;
     firstName;
     lastName;
+    role;
+    status;
 }
 exports.UserMeResponseDto = UserMeResponseDto;
 __decorate([
@@ -54,3 +56,11 @@ __decorate([
     (0, swagger_1.ApiPropertyOptional)(),
     __metadata("design:type", String)
 ], UserMeResponseDto.prototype, "lastName", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({ description: 'Mirrored from auth-service' }),
+    __metadata("design:type", String)
+], UserMeResponseDto.prototype, "role", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({ description: 'Mirrored from auth-service' }),
+    __metadata("design:type", String)
+], UserMeResponseDto.prototype, "status", void 0);

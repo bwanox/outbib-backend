@@ -1,98 +1,196 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# users-service
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Users profile service for Outbib. Provides authenticated `/users/me` read/update endpoints, mirrors account metadata from `auth-service` events via NATS JetStream, and persists user profile data in Postgres using Prisma.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## Technology
 
-## Description
+- **Runtime**: Node.js 20
+- **Framework**: NestJS
+- **Language**: TypeScript
+- **Database**: PostgreSQL
+- **ORM**: Prisma (`@prisma/client`)
+- **Auth**: JWT bearer token (custom `JwtAuthGuard`)
+- **Messaging**: NATS + JetStream consumers (optional, can be disabled)
+- **API docs**: Swagger UI at `/docs`
+- **Validation**: `class-validator` + `class-transformer` via global `ValidationPipe`
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## How it fits in the system
 
-## Project setup
+### API Gateway routing
 
-```bash
-$ npm install
-```
+Outbib exposes services through **api-gateway**.
 
-## Compile and run the project
+Gateway routing (see `apps/api-gateway/src/main.ts`):
+- Incoming: `GET /users/*`
+- Proxied to: `USERS_URL` (default `http://users-service:3000`)
+- Path rewrite: the gateway strips the `/users` prefix, so:
+  - External call: `GET http://localhost:8080/users/me`
+  - Internal forwarded call: `GET http://users-service:3000/me`
 
-```bash
-# development
-$ npm run start
+> Note: `users-service` itself defines controllers under `@Controller('users')`, so when you call the service **directly** (without the gateway rewrite), the path is `GET http://<host>:3000/users/me`.
 
-# watch mode
-$ npm run start:dev
+### Database layout / structure
 
-# production mode
-$ npm run start:prod
-```
+This service owns its **own Postgres database** and schema managed by Prisma.
 
-## Run tests
+- In `docker-compose.yml` the service uses:
+  - `DATABASE_URL=postgresql://outbib:outbib@postgres:5432/outbib_users`
 
-```bash
-# unit tests
-$ npm run test
+So the DB name is `outbib_users` (same Postgres server/container, different database from other services).
 
-# e2e tests
-$ npm run test:e2e
+#### Tables
 
-# test coverage
-$ npm run test:cov
-```
+Defined in `prisma/schema.prisma`:
 
-## Deployment
+- `UserProfile`
+  - `id` (PK, string) — **same as auth user id** (`sub` from JWT)
+  - `email` (unique, string)
+  - `role` (string, default `user`) — mirrored from auth
+  - `status` (string, default `active`) — mirrored from auth
+  - `firstName` (nullable string)
+  - `lastName` (nullable string)
+  - `createdAt` (timestamp)
+  - `updatedAt` (timestamp)
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+#### How the DB is created in compose
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+Postgres is started once (service: `postgres`) and initializes databases using scripts mounted from:
+- `docker/postgres/init/` → `/docker-entrypoint-initdb.d`
 
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
-```
+That init folder is responsible for creating per-service databases (including `outbib_users`).
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+#### Migrations
 
-## Resources
+This service uses Prisma migrations.
 
-Check out a few resources that may come in handy when working with NestJS:
+Scripts (see `apps/users-service/package.json`):
+- `npm run prisma:generate`
+- `npm run prisma:migrate:dev`
+- `npm run prisma:migrate:deploy`
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+**Important**: generating the Prisma client is handled during the Docker image build, but applying migrations is typically done:
+- in development: `prisma migrate dev`
+- in production: `prisma migrate deploy` (run as part of deployment/startup workflow)
 
-## Support
+### How it ties to auth-service
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+- **HTTP auth**: `users-service` expects a valid **JWT** on protected endpoints.
+  - It verifies tokens using `JWT_SECRET` (see `src/auth/jwt-auth.guard.ts`).
+  - Token payload is attached to `req.user` and the controller reads:
+    - `sub` → `userId`
+    - `email`, `role`, `status` (used as fallbacks)
 
-## Stay in touch
+- **Event mirroring (optional)**: when NATS is enabled, `users-service` listens to auth events and mirrors fields into its own `UserProfile` record:
+  - `role`, `status` (and on registration also `email`)
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+## Project structure (high level)
 
-## License
+- `src/main.ts`: Nest bootstrap, global validation + exception filter, Swagger setup
+- `src/common/filters/http-exception.filter.ts`: consistent JSON error responses
+- `src/auth/jwt-auth.guard.ts`: bearer token parsing + JWT verification
+- `src/users/*`: controller/service/module for profile endpoints
+- `src/events/nats-consumer.service.ts`: subscriptions to auth-related events
+- `src/prisma/prisma.service.ts`: Prisma client lifecycle
+- `prisma/schema.prisma`: `UserProfile` model
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+## Configuration (environment variables)
+
+Required / commonly used:
+
+- `PORT` (optional): HTTP port (default `3000`)
+- `DATABASE_URL` (**required**): Postgres connection string used by Prisma
+- `JWT_SECRET` (optional): JWT verification secret (default `dev-secret`)
+- `NATS_DISABLED` (optional): set to `true` to skip NATS subscriptions
+- `NATS_URL` (optional): NATS server URL (default `nats://nats:4222`)
+
+Notes:
+- If `JWT_SECRET` is not aligned with the token issuer, requests to protected endpoints will return `401`.
+- When `NATS_DISABLED=true`, the service only serves HTTP APIs and does not mirror auth events.
+
+## Running locally (workspace)
+
+This repository is a monorepo. From the repo root (`outbib-backend/`), typical commands are:
+
+- Build:
+  - `npm -w @outbib/contracts run build`
+  - `npm -w users-service run build`
+- Dev:
+  - `npm -w users-service run start:dev`
+
+## Docker
+
+`apps/users-service/Dockerfile` is a multi-stage build:
+
+- **builder** stage
+  - installs dev deps (`npm ci --include=dev`)
+  - builds `@outbib/contracts` then `users-service`
+  - runs `npm -w users-service run prisma:generate`
+- **runtime** stage
+  - installs prod deps (`npm ci --omit=dev`)
+  - copies compiled `dist/`, `prisma/`, and generated Prisma client (`node_modules/.prisma`)
+
+With docker compose (from `outbib-backend/`):
+- `docker compose build users-service`
+- `docker compose up -d users-service`
+
+## API
+
+### Swagger
+
+- `GET /docs`: Swagger UI
+
+### Health
+
+- `GET /health`
+  - Returns: `{ "status": "ok" }`
+
+### Root
+
+- `GET /`
+  - Returns a simple string from `AppService`.
+
+### Users (protected)
+
+All endpoints below require an `Authorization: Bearer <jwt>` header.
+
+#### Via api-gateway (recommended)
+
+- `GET http://localhost:8080/users/me`
+- `PATCH http://localhost:8080/users/me`
+
+#### Direct to the service (no gateway)
+
+- `GET http://<users-service-host>:3000/users/me`
+- `PATCH http://<users-service-host>:3000/users/me`
+
+#### Endpoints
+
+- `GET /users/me`
+  - Response: `UserMeResponseDto`
+  - Behavior:
+    - reads `userId` from JWT `sub`
+    - fetches profile from DB; falls back to JWT claims for `email`, `role`, `status` when DB values are missing
+
+- `PATCH /users/me`
+  - Body: `UpdateMeRequestDto`
+  - Response: `UserMeResponseDto`
+  - Behavior:
+    - upserts the user profile in DB with provided fields
+
+## Events (NATS / JetStream)
+
+When enabled, the service subscribes to Outbib auth events and mirrors user metadata into `UserProfile`.
+
+Stream/subjects:
+- Stream ensured/used: `OUTBIB_EVENTS`
+- Subjects: `outbib.>`
+
+Consumers/subscriptions created (durable):
+- `users-service-auth-user-registered-v1` → `EventNames.AuthUserRegisteredV1`
+- `users-service-auth-user-role-updated-v1` → `EventNames.AuthUserRoleUpdatedV1`
+- `users-service-auth-user-disabled-v1` → `EventNames.AuthUserDisabledV1`
+
+Handlers:
+- **User registered**: creates/updates profile with `email`, `role`, `status`
+- **Role updated**: updates `role`
+- **User disabled**: updates `status` (defaults to `disabled` when missing)

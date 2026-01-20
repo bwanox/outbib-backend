@@ -19,8 +19,10 @@ export class UsersController {
     return {
       id: userId,
       email: profile?.email ?? (req.user?.email as string),
-      firstName: profile?.firstName,
-      lastName: profile?.lastName,
+      firstName: profile?.firstName ?? undefined,
+      lastName: profile?.lastName ?? undefined,
+      role: profile?.role ?? (req.user?.role as string | undefined),
+      status: profile?.status ?? (req.user?.status as string | undefined),
     };
   }
 
@@ -38,6 +40,8 @@ export class UsersController {
       email: profile.email,
       firstName: profile.firstName ?? undefined,
       lastName: profile.lastName ?? undefined,
+      role: profile.role ?? undefined,
+      status: profile.status ?? undefined,
     };
   }
 }

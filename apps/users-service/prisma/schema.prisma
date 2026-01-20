@@ -10,6 +10,11 @@ datasource db {
 model UserProfile {
   id        String   @id
   email     String   @unique
+
+  // mirrored from auth-service events
+  role      String   @default("user")
+  status    String   @default("active")
+
   firstName String?
   lastName  String?
   createdAt DateTime @default(now())

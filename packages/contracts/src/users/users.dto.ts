@@ -27,4 +27,10 @@ export class UserMeResponseDto {
 
   @ApiPropertyOptional()
   lastName?: string;
+
+  @ApiPropertyOptional({ description: 'Mirrored from auth-service' })
+  role?: string;
+
+  @ApiPropertyOptional({ description: 'Mirrored from auth-service' })
+  status?: string;
 }
