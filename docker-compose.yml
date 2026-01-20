@@ -17,6 +17,17 @@ services:
       timeout: 5s
       retries: 20
 
+  redis:
+    image: redis:7-alpine
+    container_name: outbib-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   auth-service:
     build:
       context: .
@@ -47,6 +58,42 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  reminders-migrate:
+    build:
+      context: .
+      dockerfile: apps/reminders-service/Dockerfile
+    container_name: outbib-reminders-migrate
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://outbib:outbib@postgres:5432/outbib_reminders
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["sh", "-c", "npx prisma migrate deploy"]
+    restart: "no"
+
+  reminders-service:
+    build:
+      context: .
+      dockerfile: apps/reminders-service/Dockerfile
+    container_name: outbib-reminders-service
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: postgresql://outbib:outbib@postgres:5432/outbib_reminders
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-dev-secret}
+      NATS_DISABLED: "true"
+    ports:
+      - "3001:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      reminders-migrate:
+        condition: service_completed_successfully
 
   api-gateway:
     build:

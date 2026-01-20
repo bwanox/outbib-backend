@@ -1,0 +1,57 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ReminderType {
+  MEDICATION
+  APPOINTMENT
+}
+
+enum ReminderStatus {
+  ACTIVE
+  SNOOZED
+  COMPLETED
+  CANCELLED
+}
+
+model Reminder {
+  id            String         @id @default(uuid())
+  userId        String
+
+  type          ReminderType
+  status        ReminderStatus @default(ACTIVE)
+
+  // General fields
+  title         String
+  notes         String?
+  timezone      String
+
+  // One-time appointment
+  appointmentAt DateTime?
+  location      String?
+
+  // Medication schedule (MVP: daily times)
+  dosageText    String?
+  timesOfDay    Json?
+  startDate     DateTime?
+  endDate       DateTime?
+
+  // Scheduling state
+  lastTriggeredAt DateTime?
+  nextTriggerAt   DateTime?
+  snoozedUntil    DateTime?
+
+  deletedAt     DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([nextTriggerAt])
+  @@index([deletedAt])
+}
