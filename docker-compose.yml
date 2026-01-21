@@ -1,4 +1,7 @@
+version: '3.8'
+
 services:
+  # --- TEAM SERVICES (Postgres, Redis, Core Apps) ---
   postgres:
     image: postgres:15
     container_name: outbib-postgres
@@ -16,6 +19,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    networks:
+      - outbib-network
 
   redis:
     image: redis:7-alpine
@@ -27,6 +32,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    networks:
+      - outbib-network
 
   auth-service:
     build:
@@ -43,6 +50,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - outbib-network
 
   users-service:
     build:
@@ -58,6 +67,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - outbib-network
 
   reminders-migrate:
     build:
@@ -72,6 +83,8 @@ services:
         condition: service_healthy
     command: ["sh", "-c", "npx prisma migrate deploy"]
     restart: "no"
+    networks:
+      - outbib-network
 
   reminders-service:
     build:
@@ -94,6 +107,8 @@ services:
         condition: service_healthy
       reminders-migrate:
         condition: service_completed_successfully
+    networks:
+      - outbib-network
 
   api-gateway:
     build:
@@ -112,6 +127,26 @@ services:
         condition: service_started
       users-service:
         condition: service_started
+    networks:
+      - outbib-network
+
+  # --- YOUR NEW SERVICE ---
+  ai-service:
+    build:
+      context: .
+      args:
+        APP_NAME: ai-service
+    command: node dist/apps/ai-service/main
+    ports:
+      - "3009:3009"
+    env_file:
+      - ./apps/ai-service/.env
+    networks:
+      - outbib-network
 
 volumes:
   postgres_data:
+
+networks:
+  outbib-network:
+    driver: bridge
