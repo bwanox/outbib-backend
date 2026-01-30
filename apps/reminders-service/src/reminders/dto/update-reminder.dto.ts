@@ -1,10 +1,13 @@
 import {
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEnum,
+  IsInt,
   IsOptional,
   IsString,
   Length,
+  Min,
   ValidateIf,
 } from 'class-validator';
 import { ReminderTypeDto } from './create-reminder.dto';
@@ -59,4 +62,33 @@ export class UpdateReminderDto {
   @IsString()
   @IsOptional()
   location?: string;
+
+  // Water habit
+  @ValidateIf((o) => o.type === ReminderTypeDto.WATER_HABIT)
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  dailyGoalMl?: number;
+
+  @ValidateIf((o) => o.type === ReminderTypeDto.WATER_HABIT)
+  @IsBoolean()
+  @IsOptional()
+  nudgeEnabled?: boolean;
+
+  @ValidateIf((o) => o.type === ReminderTypeDto.WATER_HABIT)
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  nudgeEveryMinutes?: number;
+
+  @ValidateIf((o) => o.type === ReminderTypeDto.WATER_HABIT)
+  @IsString()
+  @IsOptional()
+  activeHours?: string;
+
+  // Note/task
+  @ValidateIf((o) => o.type === ReminderTypeDto.NOTE)
+  @IsDateString()
+  @IsOptional()
+  scheduledAt?: string;
 }

@@ -133,6 +133,26 @@ With docker compose (from `outbib-backend/`):
 - `docker compose build users-service`
 - `docker compose up -d users-service`
 
+## Running in Kubernetes (k8s)
+
+Kubernetes manifests live under `outbib-backend/k8s/base/`.
+
+### users-service deployment
+
+File: `k8s/base/users-service.yaml`
+
+- Uses an **initContainer** named `migrate` to run DB migrations before the application starts:
+  - `npm -w users-service run prisma:migrate:deploy`
+- Then starts the app container (`users-service`) on port `3000`.
+- Loads configuration from:
+  - ConfigMap: `outbib-config` (`k8s/base/configmap.yaml`)
+  - Secret: `outbib-secrets`
+- Sets `DATABASE_URL` for users DB: `postgresql://outbib:outbib@postgres:5432/outbib_users`
+
+### Probes (readiness/liveness)
+
+`k8s/base/users-service.yaml` probes `/health`.
+
 ## API
 
 ### Swagger
@@ -173,6 +193,9 @@ All endpoints below require an `Authorization: Bearer <jwt>` header.
 
 - `PATCH /users/me`
   - Body: `UpdateMeRequestDto`
+  - Body fields (exact):
+    - `firstName?: string` (max 100)
+    - `lastName?: string` (max 100)
   - Response: `UserMeResponseDto`
   - Behavior:
     - upserts the user profile in DB with provided fields

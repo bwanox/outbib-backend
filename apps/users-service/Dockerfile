@@ -38,7 +38,8 @@ COPY --from=builder /app/apps/users-service/dist ./dist
 
 # Copy Prisma schema + generated client/engines
 COPY --from=builder /app/apps/users-service/prisma ./prisma
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/apps/users-service/node_modules/.prisma ./apps/users-service/node_modules/.prisma
+COPY --from=builder /app/apps/users-service/node_modules/.prisma/users-service ./node_modules/.prisma/client
 
 # Copy workspace node_modules and contracts dist so runtime resolution works
 COPY --from=builder /app/apps/users-service/node_modules ./apps/users-service/node_modules
@@ -47,4 +48,3 @@ COPY --from=builder /app/packages/contracts/package.json ./node_modules/@outbib/
 
 EXPOSE 3000
 CMD ["node","dist/main.js"]
-

@@ -1,5 +1,7 @@
 generator client {
   provider = "prisma-client-js"
+  // Isolate generated client per-service to avoid schema/type conflicts across workspaces.
+  output   = "../node_modules/.prisma/reminders-service"
 }
 
 datasource db {
@@ -7,51 +9,129 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum ReminderType {
+enum ScheduleSourceType {
   MEDICATION
   APPOINTMENT
+  WATER_HABIT
+  NOTE
 }
 
-enum ReminderStatus {
+enum ScheduleSourceStatus {
   ACTIVE
   SNOOZED
-  COMPLETED
   CANCELLED
 }
 
-model Reminder {
-  id            String         @id @default(uuid())
-  userId        String
+enum CalendarOccurrenceStatus {
+  SCHEDULED
+  DONE
+  SKIPPED
+  MISSED
+  CANCELLED
+}
 
-  type          ReminderType
-  status        ReminderStatus @default(ACTIVE)
+model ScheduleSource {
+  id        String @id @default(uuid())
+  userId    String
+
+  type      ScheduleSourceType
+  status    ScheduleSourceStatus @default(ACTIVE)
 
   // General fields
-  title         String
-  notes         String?
-  timezone      String
+  title     String
+  notes     String?
+  timezone  String
 
   // One-time appointment
   appointmentAt DateTime?
   location      String?
 
-  // Medication schedule (MVP: daily times)
-  dosageText    String?
-  timesOfDay    Json?
-  startDate     DateTime?
-  endDate       DateTime?
+  // Medication schedule (daily times)
+  dosageText String?
+  timesOfDay Json?
+  startDate  DateTime?
+  endDate    DateTime?
 
-  // Scheduling state
+  // Water habit
+  dailyGoalMl       Int?
+  nudgeEnabled      Boolean?
+  nudgeEveryMinutes Int?
+  activeHours       String? // e.g. "08:00-22:00"
+
+  // Note/task
+  scheduledAt DateTime?
+
+  // Scheduling state (engine)
   lastTriggeredAt DateTime?
   nextTriggerAt   DateTime?
   snoozedUntil    DateTime?
 
-  deletedAt     DateTime?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  deletedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  occurrences CalendarOccurrence[]
 
   @@index([userId])
   @@index([status])
   @@index([nextTriggerAt])
   @@index([deletedAt])
+}
+
+model CalendarOccurrence {
+  id         String @id @default(uuid())
+  userId     String
+  sourceId   String
+  source     ScheduleSource @relation(fields: [sourceId], references: [id])
+
+  scheduledAt DateTime
+  timezone    String
+
+  status      CalendarOccurrenceStatus @default(SCHEDULED)
+  completedAt DateTime?
+  skippedAt   DateTime?
+  cancelledAt DateTime?
+
+  // Snooze is occurrence-level as well (used for timeline UX)
+  snoozedUntil DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, scheduledAt])
+  @@index([sourceId, scheduledAt])
+  @@unique([sourceId, scheduledAt])
+}
+
+model WaterLog {
+  id       String @id @default(uuid())
+  userId   String
+
+  // Stored as YYYY-MM-DD
+  date     String
+
+  totalMl  Int @default(0)
+
+  entries  WaterLogEntry[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, date])
+  @@index([userId])
+}
+
+model WaterLogEntry {
+  id        String @id @default(uuid())
+  waterLogId String
+  waterLog  WaterLog @relation(fields: [waterLogId], references: [id], onDelete: Cascade)
+
+  // ISO datetime
+  at        DateTime
+  amountMl  Int
+
+  createdAt DateTime @default(now())
+
+  @@index([waterLogId])
+  @@index([at])
 }

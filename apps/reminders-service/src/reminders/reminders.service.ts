@@ -6,19 +6,21 @@ import { REDIS_DUE_ZSET_KEY } from '../redis/redis.constants';
 import { CreateReminderDto, ReminderTypeDto } from './dto/create-reminder.dto';
 import { UpdateReminderDto } from './dto/update-reminder.dto';
 
-type ReminderStatusLiteral = 'ACTIVE' | 'SNOOZED' | 'COMPLETED' | 'CANCELLED';
-type ReminderTypeLiteral = 'MEDICATION' | 'APPOINTMENT';
+type ScheduleSourceStatusLiteral = 'ACTIVE' | 'SNOOZED' | 'CANCELLED';
 
-const ReminderStatusConst = {
+type ScheduleSourceTypeLiteral = 'MEDICATION' | 'APPOINTMENT' | 'WATER_HABIT' | 'NOTE';
+
+const ScheduleSourceStatusConst = {
   ACTIVE: 'ACTIVE',
   SNOOZED: 'SNOOZED',
-  COMPLETED: 'COMPLETED',
   CANCELLED: 'CANCELLED',
 } as const;
 
-const ReminderTypeConst = {
+const ScheduleSourceTypeConst = {
   MEDICATION: 'MEDICATION',
   APPOINTMENT: 'APPOINTMENT',
+  WATER_HABIT: 'WATER_HABIT',
+  NOTE: 'NOTE',
 } as const;
 
 @Injectable()
@@ -33,144 +35,173 @@ export class RemindersService {
   }
 
   async create(userId: string, dto: CreateReminderDto) {
-    const nextTriggerAt = this.computeNextTriggerAtFromDto(dto);
+    const nextTriggerAtIso = this.computeNextTriggerAtFromDto(dto);
 
-    const reminder = await this.prisma.reminder.create({
+    const source = await (this.prisma as any)['scheduleSource'].create({
       data: {
         userId,
         type: dto.type as any,
-        status: ReminderStatusConst.ACTIVE,
+        status: ScheduleSourceStatusConst.ACTIVE,
         title: dto.title,
         notes: dto.notes,
         timezone: dto.timezone,
+
         appointmentAt: dto.type === ReminderTypeDto.APPOINTMENT ? new Date(dto.appointmentAt) : null,
         location: dto.type === ReminderTypeDto.APPOINTMENT ? dto.location : null,
-        dosageText: dto.type === ReminderTypeDto.MEDICATION ? dto.dosageText : null,
+
+        dosageText: dto.type === ReminderTypeDto.MEDICATION ? (dto.dosageText ?? null) : null,
         timesOfDay: dto.type === ReminderTypeDto.MEDICATION ? (dto.timesOfDay as any) : null,
-        startDate: dto.startDate ? new Date(dto.startDate) : null,
-        endDate: dto.endDate ? new Date(dto.endDate) : null,
-        nextTriggerAt: nextTriggerAt ? new Date(nextTriggerAt) : null,
+        startDate: dto.type === ReminderTypeDto.MEDICATION && dto.startDate ? new Date(dto.startDate) : null,
+        endDate: dto.type === ReminderTypeDto.MEDICATION && dto.endDate ? new Date(dto.endDate) : null,
+
+        dailyGoalMl: dto.type === ReminderTypeDto.WATER_HABIT ? dto.dailyGoalMl : null,
+        nudgeEnabled: dto.type === ReminderTypeDto.WATER_HABIT ? (dto.nudgeEnabled ?? false) : null,
+        nudgeEveryMinutes: dto.type === ReminderTypeDto.WATER_HABIT ? (dto.nudgeEveryMinutes ?? null) : null,
+        activeHours: dto.type === ReminderTypeDto.WATER_HABIT ? (dto.activeHours ?? null) : null,
+
+        scheduledAt: dto.type === ReminderTypeDto.NOTE && dto.scheduledAt ? new Date(dto.scheduledAt) : null,
+
+        nextTriggerAt: nextTriggerAtIso ? new Date(nextTriggerAtIso) : null,
       },
     });
 
-    await this.syncRedisSchedule(reminder.id, reminder.nextTriggerAt);
-    return reminder;
+    await this.syncRedisSchedule(source.id, source.nextTriggerAt);
+    return source;
   }
 
   async listMine(userId: string) {
-    return this.prisma.reminder.findMany({
+    return (this.prisma as any)['scheduleSource'].findMany({
       where: { userId, deletedAt: null },
       orderBy: { createdAt: 'desc' },
     });
   }
 
   async update(userId: string, id: string, dto: UpdateReminderDto) {
-    const existing = await this.prisma.reminder.findUnique({ where: { id } });
+    const existing = await (this.prisma as any)['scheduleSource'].findUnique({ where: { id } });
     if (!existing || existing.deletedAt) throw new NotFoundException('Reminder not found');
     if (existing.userId !== userId) throw new ForbiddenException();
 
     const merged = {
-      type: (dto.type ?? existing.type) as any,
+      type: (dto.type ?? existing.type) as ScheduleSourceTypeLiteral,
       title: dto.title ?? existing.title,
       notes: dto.notes ?? existing.notes ?? undefined,
       timezone: dto.timezone ?? existing.timezone,
+
       appointmentAt: dto.appointmentAt ?? (existing.appointmentAt ? existing.appointmentAt.toISOString() : undefined),
       location: dto.location ?? existing.location ?? undefined,
+
       dosageText: dto.dosageText ?? existing.dosageText ?? undefined,
       timesOfDay: dto.timesOfDay ?? ((existing.timesOfDay as any) as string[] | undefined),
       startDate: dto.startDate ?? (existing.startDate ? existing.startDate.toISOString() : undefined),
       endDate: dto.endDate ?? (existing.endDate ? existing.endDate.toISOString() : undefined),
+
+      dailyGoalMl: dto.dailyGoalMl ?? existing.dailyGoalMl ?? undefined,
+      nudgeEnabled: dto.nudgeEnabled ?? existing.nudgeEnabled ?? undefined,
+      nudgeEveryMinutes: dto.nudgeEveryMinutes ?? existing.nudgeEveryMinutes ?? undefined,
+      activeHours: dto.activeHours ?? existing.activeHours ?? undefined,
+
+      scheduledAt: dto.scheduledAt ?? (existing.scheduledAt ? existing.scheduledAt.toISOString() : undefined),
     } as any;
 
-    const nextTriggerAt = this.computeNextTriggerAtFromMerged(existing.status, existing.snoozedUntil, merged);
+    const nextTriggerAtIso = this.computeNextTriggerAtFromMerged(existing.status as any, existing.snoozedUntil, merged);
 
-    const reminder = await this.prisma.reminder.update({
+    const source = await (this.prisma as any)['scheduleSource'].update({
       where: { id },
       data: {
         type: merged.type,
         title: merged.title,
         notes: merged.notes,
         timezone: merged.timezone,
-        appointmentAt: merged.type === ReminderTypeConst.APPOINTMENT ? (merged.appointmentAt ? new Date(merged.appointmentAt) : null) : null,
-        location: merged.type === ReminderTypeConst.APPOINTMENT ? merged.location : null,
-        dosageText: merged.type === ReminderTypeConst.MEDICATION ? merged.dosageText : null,
-        timesOfDay: merged.type === ReminderTypeConst.MEDICATION ? ((merged.timesOfDay as any) ?? null) : null,
-        startDate: merged.startDate ? new Date(merged.startDate) : null,
-        endDate: merged.endDate ? new Date(merged.endDate) : null,
-        nextTriggerAt: nextTriggerAt ? new Date(nextTriggerAt) : null,
+
+        appointmentAt: merged.type === ScheduleSourceTypeConst.APPOINTMENT ? (merged.appointmentAt ? new Date(merged.appointmentAt) : null) : null,
+        location: merged.type === ScheduleSourceTypeConst.APPOINTMENT ? merged.location : null,
+
+        dosageText: merged.type === ScheduleSourceTypeConst.MEDICATION ? (merged.dosageText ?? null) : null,
+        timesOfDay: merged.type === ScheduleSourceTypeConst.MEDICATION ? ((merged.timesOfDay as any) ?? null) : null,
+        startDate: merged.type === ScheduleSourceTypeConst.MEDICATION && merged.startDate ? new Date(merged.startDate) : null,
+        endDate: merged.type === ScheduleSourceTypeConst.MEDICATION && merged.endDate ? new Date(merged.endDate) : null,
+
+        dailyGoalMl: merged.type === ScheduleSourceTypeConst.WATER_HABIT ? (merged.dailyGoalMl ?? null) : null,
+        nudgeEnabled: merged.type === ScheduleSourceTypeConst.WATER_HABIT ? (merged.nudgeEnabled ?? null) : null,
+        nudgeEveryMinutes: merged.type === ScheduleSourceTypeConst.WATER_HABIT ? (merged.nudgeEveryMinutes ?? null) : null,
+        activeHours: merged.type === ScheduleSourceTypeConst.WATER_HABIT ? (merged.activeHours ?? null) : null,
+
+        scheduledAt: merged.type === ScheduleSourceTypeConst.NOTE ? (merged.scheduledAt ? new Date(merged.scheduledAt) : null) : null,
+
+        nextTriggerAt: nextTriggerAtIso ? new Date(nextTriggerAtIso) : null,
       },
     });
 
-    await this.syncRedisSchedule(reminder.id, reminder.nextTriggerAt);
-    return reminder;
+    await this.syncRedisSchedule(source.id, source.nextTriggerAt);
+    return source;
   }
 
   async softDelete(userId: string, id: string) {
-    const existing = await this.prisma.reminder.findUnique({ where: { id } });
+    const existing = await (this.prisma as any)['scheduleSource'].findUnique({ where: { id } });
     if (!existing || existing.deletedAt) throw new NotFoundException('Reminder not found');
     if (existing.userId !== userId) throw new ForbiddenException();
 
-    const reminder = await this.prisma.reminder.update({
+    const source = await (this.prisma as any)['scheduleSource'].update({
       where: { id },
       data: {
         deletedAt: new Date(),
-        status: ReminderStatusConst.CANCELLED,
+        status: ScheduleSourceStatusConst.CANCELLED,
         nextTriggerAt: null,
       },
     });
 
     await this.redis.zrem(REDIS_DUE_ZSET_KEY, id);
-    return reminder;
+    return source;
   }
 
   async snooze(userId: string, id: string, snoozedUntilIso: string) {
-    const existing = await this.prisma.reminder.findUnique({ where: { id } });
+    const existing = await (this.prisma as any)['scheduleSource'].findUnique({ where: { id } });
     if (!existing || existing.deletedAt) throw new NotFoundException('Reminder not found');
     if (existing.userId !== userId) throw new ForbiddenException();
 
     const snoozedUntil = new Date(snoozedUntilIso);
     if (Number.isNaN(snoozedUntil.getTime())) throw new BadRequestException('Invalid snoozedUntil');
 
-    const reminder = await this.prisma.reminder.update({
+    const source = await (this.prisma as any)['scheduleSource'].update({
       where: { id },
       data: {
-        status: ReminderStatusConst.SNOOZED,
+        status: ScheduleSourceStatusConst.SNOOZED,
         snoozedUntil,
         nextTriggerAt: snoozedUntil,
       },
     });
 
-    await this.syncRedisSchedule(reminder.id, reminder.nextTriggerAt);
-    return reminder;
+    await this.syncRedisSchedule(source.id, source.nextTriggerAt);
+    return source;
   }
 
   async rebuildCacheFromPostgres() {
-    const reminders = await this.prisma.reminder.findMany({
+    const sources = await (this.prisma as any)['scheduleSource'].findMany({
       where: {
         deletedAt: null,
-        status: { in: [ReminderStatusConst.ACTIVE, ReminderStatusConst.SNOOZED] },
+        status: { in: [ScheduleSourceStatusConst.ACTIVE, ScheduleSourceStatusConst.SNOOZED] },
         nextTriggerAt: { not: null },
       },
       select: { id: true, nextTriggerAt: true },
     });
 
-    if (!reminders.length) return { rebuilt: 0 };
+    if (!sources.length) return { rebuilt: 0 };
 
     const pipeline = this.redis.pipeline();
-    for (const r of reminders) {
-      pipeline.zadd(REDIS_DUE_ZSET_KEY, r.nextTriggerAt!.getTime(), r.id);
+    for (const s of sources) {
+      pipeline.zadd(REDIS_DUE_ZSET_KEY, s.nextTriggerAt!.getTime(), s.id);
     }
     await pipeline.exec();
 
-    return { rebuilt: reminders.length };
+    return { rebuilt: sources.length };
   }
 
-  private async syncRedisSchedule(reminderId: string, nextTriggerAt: Date | null) {
+  private async syncRedisSchedule(sourceId: string, nextTriggerAt: Date | null) {
     if (!nextTriggerAt) {
-      await this.redis.zrem(REDIS_DUE_ZSET_KEY, reminderId);
+      await this.redis.zrem(REDIS_DUE_ZSET_KEY, sourceId);
       return;
     }
-    await this.redis.zadd(REDIS_DUE_ZSET_KEY, nextTriggerAt.getTime(), reminderId);
+    await this.redis.zadd(REDIS_DUE_ZSET_KEY, nextTriggerAt.getTime(), sourceId);
   }
 
   private computeNextTriggerAtFromDto(dto: CreateReminderDto): string | null {
@@ -178,8 +209,19 @@ export class RemindersService {
       return dto.appointmentAt;
     }
 
+    if (dto.type === ReminderTypeDto.NOTE) {
+      return dto.scheduledAt ?? null;
+    }
+
+    // WATER_HABIT: not schedule-indexed by default (tracking-only). Return null.
+    if (dto.type === ReminderTypeDto.WATER_HABIT) {
+      return null;
+    }
+
     // MEDICATION (daily times)
-    const start = dto.startDate ? DateTime.fromISO(dto.startDate, { zone: dto.timezone }) : DateTime.now().setZone(dto.timezone);
+    const start = dto.startDate
+      ? DateTime.fromISO(dto.startDate, { zone: dto.timezone })
+      : DateTime.now().setZone(dto.timezone);
     const now = DateTime.now().setZone(dto.timezone);
     const from = start > now ? start : now;
 
@@ -195,23 +237,32 @@ export class RemindersService {
   }
 
   private computeNextTriggerAtFromMerged(
-    status: ReminderStatusLiteral,
+    status: ScheduleSourceStatusLiteral,
     snoozedUntil: Date | null,
     merged: {
-      type: ReminderTypeLiteral;
+      type: ScheduleSourceTypeLiteral;
       timezone: string;
       appointmentAt?: string;
       timesOfDay?: string[];
       startDate?: string;
       endDate?: string;
+      scheduledAt?: string;
     },
   ): string | null {
-    if (status === ReminderStatusConst.SNOOZED && snoozedUntil) {
+    if (status === ScheduleSourceStatusConst.SNOOZED && snoozedUntil) {
       return snoozedUntil.toISOString();
     }
 
-    if (merged.type === ReminderTypeConst.APPOINTMENT) {
+    if (merged.type === ScheduleSourceTypeConst.APPOINTMENT) {
       return merged.appointmentAt ?? null;
+    }
+
+    if (merged.type === ScheduleSourceTypeConst.NOTE) {
+      return merged.scheduledAt ?? null;
+    }
+
+    if (merged.type === ScheduleSourceTypeConst.WATER_HABIT) {
+      return null;
     }
 
     if (!merged.timesOfDay?.length) return null;

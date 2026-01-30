@@ -13,6 +13,19 @@ spec:
       labels:
         app: reminders-service
     spec:
+      initContainers:
+        - name: migrate
+          image: outbib-reminders-service:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: outbib-config
+            - secretRef:
+                name: outbib-secrets
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://outbib:outbib@postgres:5432/outbib_reminders"
+          command: ["sh", "-lc", "npm -w reminders-service run prisma:migrate:deploy"]
       containers:
         - name: reminders-service
           image: outbib-reminders-service:dev

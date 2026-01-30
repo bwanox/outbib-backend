@@ -1,15 +1,17 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { DateTime } from 'luxon';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { REDIS_DUE_ZSET_KEY } from '../redis/redis.constants';
 import { ReminderEventsPublisher } from '../events/reminder-events.publisher';
 
-type ReminderStatusLiteral = 'ACTIVE' | 'SNOOZED' | 'COMPLETED' | 'CANCELLED';
+type ScheduleSourceStatusLiteral = 'ACTIVE' | 'SNOOZED' | 'CANCELLED';
 
-const ReminderStatusConst = {
+type ScheduleSourceTypeLiteral = 'MEDICATION' | 'APPOINTMENT' | 'WATER_HABIT' | 'NOTE';
+
+const ScheduleSourceStatusConst = {
   ACTIVE: 'ACTIVE',
   SNOOZED: 'SNOOZED',
-  COMPLETED: 'COMPLETED',
   CANCELLED: 'CANCELLED',
 } as const;
 
@@ -48,22 +50,22 @@ export class SchedulerService implements OnModuleInit {
   }
 
   private async rebuildRedisZset() {
-    const reminders = await this.prisma.reminder.findMany({
+    const sources = await (this.prisma as any)['scheduleSource'].findMany({
       where: {
         deletedAt: null,
-        status: { in: [ReminderStatusConst.ACTIVE, ReminderStatusConst.SNOOZED] as ReminderStatusLiteral[] },
+        status: { in: [ScheduleSourceStatusConst.ACTIVE, ScheduleSourceStatusConst.SNOOZED] as ScheduleSourceStatusLiteral[] },
         nextTriggerAt: { not: null },
       },
       select: { id: true, nextTriggerAt: true },
     });
 
     const pipeline = this.redis.pipeline();
-    for (const r of reminders) {
-      pipeline.zadd(REDIS_DUE_ZSET_KEY, r.nextTriggerAt!.getTime(), r.id);
+    for (const s of sources) {
+      pipeline.zadd(REDIS_DUE_ZSET_KEY, s.nextTriggerAt!.getTime(), s.id);
     }
     await pipeline.exec();
 
-    this.logger.log(`Rebuilt Redis schedule from Postgres: ${reminders.length} reminders`);
+    this.logger.log(`Rebuilt Redis schedule from Postgres: ${sources.length} sources`);
   }
 
   private async tick() {
@@ -74,83 +76,159 @@ export class SchedulerService implements OnModuleInit {
     if (!dueIds.length) return;
 
     for (const id of dueIds) {
-      await this.processReminder(id);
+      await this.processSource(id);
     }
   }
 
-  private async processReminder(reminderId: string) {
-    const reminder = await this.prisma.reminder.findUnique({ where: { id: reminderId } });
-    if (!reminder || reminder.deletedAt || !reminder.nextTriggerAt) {
-      await this.redis.zrem(REDIS_DUE_ZSET_KEY, reminderId);
+  private async processSource(sourceId: string) {
+    const source = await (this.prisma as any)['scheduleSource'].findUnique({ where: { id: sourceId } });
+    if (!source || source.deletedAt || !source.nextTriggerAt) {
+      await this.redis.zrem(REDIS_DUE_ZSET_KEY, sourceId);
       return;
     }
 
     const now = new Date();
-    if (reminder.nextTriggerAt.getTime() > now.getTime()) {
+    if (source.nextTriggerAt.getTime() > now.getTime()) {
       // stale Redis entry; fix score
-      await this.redis.zadd(REDIS_DUE_ZSET_KEY, reminder.nextTriggerAt.getTime(), reminderId);
+      await this.redis.zadd(REDIS_DUE_ZSET_KEY, source.nextTriggerAt.getTime(), sourceId);
       return;
     }
 
-    if (reminder.status !== ReminderStatusConst.ACTIVE && reminder.status !== ReminderStatusConst.SNOOZED) {
-      await this.redis.zrem(REDIS_DUE_ZSET_KEY, reminderId);
+    if (source.status !== ScheduleSourceStatusConst.ACTIVE && source.status !== ScheduleSourceStatusConst.SNOOZED) {
+      await this.redis.zrem(REDIS_DUE_ZSET_KEY, sourceId);
       return;
     }
 
-    // Publish due event
-    await this.publisher.publishReminderDue({
-      reminderId: reminder.id,
-      userId: reminder.userId,
-      type: reminder.type,
-      title: reminder.title,
-      scheduledFor: reminder.nextTriggerAt.toISOString(),
-      triggeredAt: now.toISOString(),
-    });
-
-    // Update state: for appointment -> complete, for medication -> compute next occurrence.
-    if (reminder.type === 'APPOINTMENT') {
-      await this.prisma.reminder.update({
-        where: { id: reminderId },
-        data: {
-          status: ReminderStatusConst.COMPLETED,
-          lastTriggeredAt: now,
-          nextTriggerAt: null,
-          snoozedUntil: null,
+    // Materialize/Upsert occurrence for timeline state.
+    const occurrence = await (this.prisma as any)['calendarOccurrence'].upsert({
+      where: {
+        sourceId_scheduledAt: {
+          sourceId: source.id,
+          scheduledAt: source.nextTriggerAt,
         },
-      });
-      await this.redis.zrem(REDIS_DUE_ZSET_KEY, reminderId);
-      return;
-    }
-
-    // Medication: naive recurrence: add 1 day keeping the same time (based on nextTriggerAt)
-    // This is acceptable for MVP; can be replaced with full timezone-aware recomputation.
-    const next = new Date(reminder.nextTriggerAt.getTime() + 24 * 60 * 60 * 1000);
-
-    // Respect endDate if provided
-    if (reminder.endDate && next.getTime() > reminder.endDate.getTime()) {
-      await this.prisma.reminder.update({
-        where: { id: reminderId },
-        data: {
-          status: ReminderStatusConst.COMPLETED,
-          lastTriggeredAt: now,
-          nextTriggerAt: null,
-          snoozedUntil: null,
-        },
-      });
-      await this.redis.zrem(REDIS_DUE_ZSET_KEY, reminderId);
-      return;
-    }
-
-    await this.prisma.reminder.update({
-      where: { id: reminderId },
-      data: {
-        status: ReminderStatusConst.ACTIVE,
-        lastTriggeredAt: now,
-        snoozedUntil: null,
-        nextTriggerAt: next,
+      },
+      create: {
+        userId: source.userId,
+        sourceId: source.id,
+        scheduledAt: source.nextTriggerAt,
+        timezone: source.timezone,
+        status: 'SCHEDULED',
+      },
+      update: {
+        // If it already exists, do not overwrite a user-updated status.
       },
     });
 
-    await this.redis.zadd(REDIS_DUE_ZSET_KEY, next.getTime(), reminderId);
+    // Publish due event
+    await this.publisher.publishReminderDue({
+      reminderId: source.id, // backward compat
+      sourceId: source.id,
+      userId: source.userId,
+      type: source.type as any,
+      title: source.title,
+      scheduledFor: source.nextTriggerAt.toISOString(),
+      triggeredAt: now.toISOString(),
+    });
+
+    // Compute the next trigger.
+    const nextTriggerAt = this.computeNextTriggerAtAfterDue(source.type as any, source, source.nextTriggerAt);
+
+    await (this.prisma as any)['scheduleSource'].update({
+      where: { id: sourceId },
+      data: {
+        status: ScheduleSourceStatusConst.ACTIVE,
+        lastTriggeredAt: now,
+        snoozedUntil: null,
+        nextTriggerAt,
+      },
+    });
+
+    if (!nextTriggerAt) {
+      await this.redis.zrem(REDIS_DUE_ZSET_KEY, sourceId);
+    } else {
+      await this.redis.zadd(REDIS_DUE_ZSET_KEY, nextTriggerAt.getTime(), sourceId);
+    }
+
+    // Keep linter from complaining about unused var in some configs.
+    void occurrence;
+  }
+
+  private computeNextTriggerAtAfterDue(
+    type: ScheduleSourceTypeLiteral,
+    source: {
+      timezone: string;
+      timesOfDay: any;
+      endDate: Date | null;
+    },
+    justTriggeredAt: Date,
+  ): Date | null {
+    if (type === 'APPOINTMENT' || type === 'NOTE') {
+      return null;
+    }
+
+    if (type === 'WATER_HABIT') {
+      return null;
+    }
+
+    // MEDICATION: recompute next execution from just-after current trigger.
+    const times = (source.timesOfDay as string[] | null) ?? [];
+    if (!times.length) return null;
+
+    const zone = source.timezone;
+    const from = DateTime.fromJSDate(justTriggeredAt, { zone }).plus({ minutes: 1 });
+
+    const next = this.nextTimeOfDay(from, times, zone);
+    if (!next) return null;
+
+    if (source.endDate) {
+      const end = DateTime.fromJSDate(source.endDate, { zone }).endOf('day');
+      if (next > end) return null;
+    }
+
+    return next.toUTC().toJSDate();
+  }
+
+  private nextTimeOfDay(from: DateTime, timesOfDay: string[], zone: string): DateTime | null {
+    const parsed = timesOfDay
+      .map((t) => {
+        const [hh, mm] = t.split(':').map((x) => Number(x));
+        if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
+        return { hh, mm };
+      })
+      .filter(Boolean) as Array<{ hh: number; mm: number }>;
+
+    if (!parsed.length) return null;
+
+    const sorted = parsed.sort((a, b) => a.hh * 60 + a.mm - (b.hh * 60 + b.mm));
+
+    for (const t of sorted) {
+      const candidate = DateTime.fromObject(
+        {
+          year: from.year,
+          month: from.month,
+          day: from.day,
+          hour: t.hh,
+          minute: t.mm,
+          second: 0,
+          millisecond: 0,
+        },
+        { zone },
+      );
+      if (candidate >= from) return candidate;
+    }
+
+    const first = sorted[0];
+    return DateTime.fromObject(
+      {
+        year: from.plus({ days: 1 }).year,
+        month: from.plus({ days: 1 }).month,
+        day: from.plus({ days: 1 }).day,
+        hour: first.hh,
+        minute: first.mm,
+        second: 0,
+        millisecond: 0,
+      },
+      { zone },
+    );
   }
 }

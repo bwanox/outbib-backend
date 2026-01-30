@@ -51,7 +51,8 @@ COPY --from=builder /app/apps/auth-service/dist ./dist
 
 # Copy Prisma schema + generated client
 COPY --from=builder /app/apps/auth-service/prisma ./prisma
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/apps/auth-service/node_modules/.prisma ./apps/auth-service/node_modules/.prisma
+COPY --from=builder /app/apps/auth-service/node_modules/.prisma/auth-service ./node_modules/.prisma/client
 
 # Copy workspace node_modules so runtime has @nestjs/platform-express (and other deps) where Node resolves it.
 COPY --from=builder /app/apps/auth-service/node_modules ./apps/auth-service/node_modules
@@ -62,4 +63,3 @@ COPY --from=builder /app/packages/contracts/package.json ./node_modules/@outbib/
 
 EXPOSE 3000
 CMD ["node","dist/main.js"]
-

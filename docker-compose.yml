@@ -44,6 +44,7 @@ services:
       NODE_ENV: production
       PORT: "3000"
       DATABASE_URL: postgresql://outbib:outbib@postgres:5432/outbib_auth
+      JWT_SECRET: ${JWT_SECRET:-dev-secret}
       NATS_DISABLED: "true"
     ports:
       - "3000:3000"
@@ -78,6 +79,7 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://outbib:outbib@postgres:5432/outbib_reminders
+      JWT_SECRET: ${JWT_SECRET:-dev-secret}
     depends_on:
       postgres:
         condition: service_healthy
@@ -134,11 +136,16 @@ services:
   ai-service:
     build:
       context: .
+      dockerfile: apps/ai-service/Dockerfile
       args:
         APP_NAME: ai-service
-    command: node dist/apps/ai-service/main
+    environment:
+      PORT: "3000"
+      DATABASE_URL: postgresql://outbib:outbib@postgres:5432/outbib
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-dev-secret}
     ports:
-      - "3009:3009"
+      - "3009:3000"
     env_file:
       - ./apps/ai-service/.env
     networks:

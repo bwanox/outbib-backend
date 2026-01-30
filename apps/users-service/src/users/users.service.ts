@@ -15,7 +15,7 @@ export class UsersService {
       status?: string;
     },
   ) {
-    return this.prisma.userProfile.upsert({
+    return (this.prisma as any)['userProfile'].upsert({
       where: { id: userId },
       create: { id: userId, email, ...data },
       update: { ...data },
@@ -23,7 +23,7 @@ export class UsersService {
   }
 
   async setAccountMetadata(userId: string, data: { role?: string; status?: string }) {
-    return this.prisma.userProfile.upsert({
+    return (this.prisma as any)['userProfile'].upsert({
       where: { id: userId },
       create: {
         id: userId,
@@ -36,6 +36,6 @@ export class UsersService {
   }
 
   async getProfile(userId: string) {
-    return this.prisma.userProfile.findUnique({ where: { id: userId } });
+    return (this.prisma as any)['userProfile'].findUnique({ where: { id: userId } });
   }
 }

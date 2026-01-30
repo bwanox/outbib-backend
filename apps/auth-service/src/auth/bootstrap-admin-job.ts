@@ -44,10 +44,10 @@ async function main() {
   const prisma = new PrismaClient();
 
   try {
-    const existing = await prisma.user.findUnique({ where: { email: normalized } });
+    const existing = await (prisma as any)['user'].findUnique({ where: { email: normalized } });
     if (existing) {
       if (existing.role !== 'admin' && allowPromoteExisting) {
-        await prisma.user.update({ where: { id: existing.id }, data: { role: 'admin' } });
+        await (prisma as any)['user'].update({ where: { id: existing.id }, data: { role: 'admin' } });
         console.log('Admin bootstrap: existing user promoted to admin');
       } else {
         console.log('Admin bootstrap: user exists, no changes');
@@ -56,7 +56,7 @@ async function main() {
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
-    await prisma.user.create({
+    await (prisma as any)['user'].create({
       data: {
         email: normalized,
         passwordHash,

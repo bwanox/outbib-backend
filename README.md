@@ -199,6 +199,7 @@ This command will:
 * Load images into the cluster
 * Deploy Postgres & Redis
 * Deploy all microservices
+* Run Prisma migrations via service initContainers (auth/users/reminders)
 * Apply Ingress
 
 ---
@@ -292,7 +293,7 @@ kubectl run tmp-curl --rm -i --restart=Never -n outbib --image=curlimages/curl -
 ## 12. Next Steps
 
 * Implement business logic per service
-* Add Prisma & database migrations
+* Add seed data / fixtures
 * Secure endpoints with JWT
 * Connect frontend (React Native)
 * Add CI/CD pipeline

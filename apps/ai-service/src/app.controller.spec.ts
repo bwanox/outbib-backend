@@ -14,7 +14,7 @@ describe('AppController', () => {
           provide: AiService,
           useValue: {
             // Mock the service to return a fake string
-            getMedicalAdvice: jest.fn().mockResolvedValue('Mock AI Response'),
+            getMedicalAdvice: jest.fn().mockResolvedValue({ answer: 'Mock AI Response', nextStep: null }),
           },
         },
       ],
@@ -33,7 +33,7 @@ describe('AppController', () => {
       const result = await appController.chat(mockMessages);
       
       // 3. Expect the result
-      expect(result).toBe('Mock AI Response');
+      expect(result).toEqual({ answer: 'Mock AI Response', nextStep: null });
       // 4. Verify the service was called with our array
       expect(aiService.getMedicalAdvice).toHaveBeenCalledWith(mockMessages);
     });

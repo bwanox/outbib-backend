@@ -4,6 +4,10 @@ set -euo pipefail
 CLUSTER_NAME="outbib"
 NS="outbib"
 
+# Pin to a released ingress-nginx manifest for reproducible local dev.
+INGRESS_NGINX_VERSION="controller-v1.14.2"
+INGRESS_NGINX_MANIFEST_URL="https://raw.githubusercontent.com/kubernetes/ingress-nginx/${INGRESS_NGINX_VERSION}/deploy/static/provider/kind/deploy.yaml"
+
 cd "$(dirname "$0")/.."
 
 command -v docker >/dev/null || { echo "❌ docker not found"; exit 1; }
@@ -17,17 +21,40 @@ else
   kind create cluster --config k8s/kind-cluster.yaml
 fi
 
-echo "== 2) Install ingress-nginx =="
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
-kubectl wait --namespace ingress-nginx \
-  --for=condition=ready pod \
-  --selector=app.kubernetes.io/component=controller \
-  --timeout=180s
+echo "== 2) Install ingress-nginx (${INGRESS_NGINX_VERSION}) =="
+# Avoid re-downloading the manifest every run (raw.githubusercontent.com can be blocked/slow).
+if kubectl -n ingress-nginx get deploy ingress-nginx-controller >/dev/null 2>&1; then
+  echo "ℹ️  ingress-nginx already installed; skipping manifest apply"
+else
+  echo "ℹ️  applying: ${INGRESS_NGINX_MANIFEST_URL}"
+  kubectl apply -f "${INGRESS_NGINX_MANIFEST_URL}"
+fi
+
+# Wait for the admission jobs to complete (these create the webhook cert secret).
+# The patch job can complete and disappear quickly depending on k8s/job settings, so don't hard-fail.
+if kubectl -n ingress-nginx get job ingress-nginx-admission-create >/dev/null 2>&1; then
+  kubectl wait --namespace ingress-nginx \
+    --for=condition=complete job/ingress-nginx-admission-create \
+    --timeout=300s || true
+fi
+if kubectl -n ingress-nginx get job ingress-nginx-admission-patch >/dev/null 2>&1; then
+  kubectl wait --namespace ingress-nginx \
+    --for=condition=complete job/ingress-nginx-admission-patch \
+    --timeout=300s || true
+fi
+
+# Then wait for the controller deployment to be available.
+kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=300s
 
 echo "== 3) Build images =="
 SERVICES=(auth-service users-service doctors-service pharmacies-service reminders-service emergencies-service ai-service api-gateway)
 for s in "${SERVICES[@]}"; do
-  docker build -t "outbib-$s:dev" "apps/$s"
+  if [[ -f "apps/$s/Dockerfile" ]]; then
+    # Build from repo root so Dockerfiles can COPY workspace paths (packages/*, apps/*).
+    docker build -t "outbib-$s:dev" -f "apps/$s/Dockerfile" .
+  else
+    echo "❌ Missing Dockerfile for $s"; exit 1
+  fi
 done
 
 echo "== 4) Load images into kind =="

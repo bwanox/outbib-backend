@@ -3,9 +3,11 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { ExpressAdapter } from '@nestjs/platform-express';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // Explicitly choose the HTTP driver (Express) to avoid PackageLoader autodetection issues.
+  const app = await NestFactory.create(AppModule, new ExpressAdapter());
 
   app.useGlobalFilters(new HttpExceptionFilter());
 

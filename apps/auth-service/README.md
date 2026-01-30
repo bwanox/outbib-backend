@@ -277,6 +277,38 @@ Protected endpoints require:
 - Body: `DisableUserRequestDto` (currently empty DTO)
 - Response: `MeResponseDto`
 
+## DTO / Response shapes (exact field names)
+
+These are the exact request/response JSON shapes used by this service (imported from `@outbib/contracts`, see `packages/contracts/src/auth/auth.dto.ts`).
+
+### Register
+- **POST** `/auth/register`
+- Request (`RegisterRequestDto`):
+  - `email`: string
+  - `password`: string
+- Response (`MeResponseDto`):
+  - `id`: string
+  - `email`: string
+  - `role`: `user` | `admin`
+  - `status`: `active` | `disabled`
+
+### Login
+- **POST** `/auth/login`
+- Request (`LoginRequestDto`):
+  - `email`: string
+  - `password`: string
+- Response (`AuthTokensDto`):
+  - `accessToken`: string
+  - `refreshToken`: string
+
+### Refresh (rotate tokens)
+- **POST** `/auth/refresh`
+- Request (`RefreshRequestDto`):
+  - `refreshToken`: string
+- Response (`AuthTokensDto`):
+  - `accessToken`: string
+  - `refreshToken`: string
+
 ## HTTP error handling
 
 A global exception filter is registered in `src/main.ts` (`HttpExceptionFilter`). Validation uses a global `ValidationPipe` with:

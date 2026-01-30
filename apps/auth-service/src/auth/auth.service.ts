@@ -16,11 +16,14 @@ export class AuthService {
 
   async register(email: string, password: string) {
     const normalized = email.toLowerCase();
-    const existing = await this.prisma.user.findUnique({ where: { email: normalized } });
+    // NOTE: In this monorepo, Prisma Client types can be overwritten by another service's schema generation.
+    // We intentionally use a loosely-typed delegate accessor here to keep builds unblocked.
+    // TODO: isolate Prisma clients per service (separate generated outputs) and remove these casts.
+    const existing = await (this.prisma as any)['user'].findUnique({ where: { email: normalized } });
     if (existing) throw new ConflictException('Email already registered');
 
     const passwordHash = await bcrypt.hash(password, 10);
-    const user = await this.prisma.user.create({
+    const user = await (this.prisma as any)['user'].create({
       data: {
         email: normalized,
         passwordHash,
@@ -33,7 +36,10 @@ export class AuthService {
   }
 
   async login(email: string, password: string) {
-    const user = await this.prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    // NOTE: In this monorepo, Prisma Client types can be overwritten by another service's schema generation.
+    // We intentionally use a loosely-typed delegate accessor here to keep builds unblocked.
+    // TODO: isolate Prisma clients per service (separate generated outputs) and remove these casts.
+    const user = await (this.prisma as any)['user'].findUnique({ where: { email: email.toLowerCase() } });
     if (!user) throw new UnauthorizedException('Invalid credentials');
     if (user.status === 'disabled') throw new UnauthorizedException('Account disabled');
 
@@ -43,7 +49,7 @@ export class AuthService {
     const { accessToken, refreshToken } = await this.issueTokens(user.id, user.email, user.role);
     const refreshTokenHash = await bcrypt.hash(refreshToken, REFRESH_SALT_ROUNDS);
 
-    await this.prisma.user.update({
+    await (this.prisma as any)['user'].update({
       where: { id: user.id },
       data: { refreshTokenHash },
     });
@@ -57,7 +63,10 @@ export class AuthService {
     });
 
     const userId = payload.sub as string;
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    // NOTE: In this monorepo, Prisma Client types can be overwritten by another service's schema generation.
+    // We intentionally use a loosely-typed delegate accessor here to keep builds unblocked.
+    // TODO: isolate Prisma clients per service (separate generated outputs) and remove these casts.
+    const user = await (this.prisma as any)['user'].findUnique({ where: { id: userId } });
     if (!user) throw new UnauthorizedException('Invalid refresh token');
     if (user.status === 'disabled') throw new UnauthorizedException('Account disabled');
     if (!user.refreshTokenHash) throw new UnauthorizedException('Logged out');
@@ -68,7 +77,7 @@ export class AuthService {
     // Rotate refresh token
     const tokens = await this.issueTokens(user.id, user.email, user.role);
     const newHash = await bcrypt.hash(tokens.refreshToken, REFRESH_SALT_ROUNDS);
-    await this.prisma.user.update({ where: { id: user.id }, data: { refreshTokenHash: newHash } });
+    await (this.prisma as any)['user'].update({ where: { id: user.id }, data: { refreshTokenHash: newHash } });
 
     return tokens;
   }
@@ -80,7 +89,10 @@ export class AuthService {
         secret: process.env.JWT_REFRESH_SECRET || (process.env.JWT_SECRET || 'dev-secret'),
       });
       const userId = payload.sub as string;
-      await this.prisma.user.update({ where: { id: userId }, data: { refreshTokenHash: null } });
+      // NOTE: In this monorepo, Prisma Client types can be overwritten by another service's schema generation.
+      // We intentionally use a loosely-typed delegate accessor here to keep builds unblocked.
+      // TODO: isolate Prisma clients per service (separate generated outputs) and remove these casts.
+      await (this.prisma as any)['user'].update({ where: { id: userId }, data: { refreshTokenHash: null } });
     } catch {
       // ignore
     }
@@ -89,7 +101,10 @@ export class AuthService {
   }
 
   async me(userId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    // NOTE: In this monorepo, Prisma Client types can be overwritten by another service's schema generation.
+    // We intentionally use a loosely-typed delegate accessor here to keep builds unblocked.
+    // TODO: isolate Prisma clients per service (separate generated outputs) and remove these casts.
+    const user = await (this.prisma as any)['user'].findUnique({ where: { id: userId } });
     if (!user) throw new UnauthorizedException('Invalid user');
     return {
       id: user.id,
@@ -100,7 +115,10 @@ export class AuthService {
   }
 
   async setRole(userId: string, role: 'user' | 'admin') {
-    const user = await this.prisma.user.update({
+    // NOTE: In this monorepo, Prisma Client types can be overwritten by another service's schema generation.
+    // We intentionally use a loosely-typed delegate accessor here to keep builds unblocked.
+    // TODO: isolate Prisma clients per service (separate generated outputs) and remove these casts.
+    const user = await (this.prisma as any)['user'].update({
       where: { id: userId },
       data: { role },
     });
@@ -110,7 +128,10 @@ export class AuthService {
   }
 
   async disableUser(userId: string) {
-    const user = await this.prisma.user.update({
+    // NOTE: In this monorepo, Prisma Client types can be overwritten by another service's schema generation.
+    // We intentionally use a loosely-typed delegate accessor here to keep builds unblocked.
+    // TODO: isolate Prisma clients per service (separate generated outputs) and remove these casts.
+    const user = await (this.prisma as any)['user'].update({
       where: { id: userId },
       data: { status: 'disabled' },
     });

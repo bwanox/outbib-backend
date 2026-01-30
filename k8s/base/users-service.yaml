@@ -13,6 +13,19 @@ spec:
       labels:
         app: users-service
     spec:
+      initContainers:
+        - name: migrate
+          image: outbib-users-service:dev
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: outbib-config
+            - secretRef:
+                name: outbib-secrets
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://outbib:outbib@postgres:5432/outbib_users"
+          command: ["sh", "-lc", "npm -w users-service run prisma:migrate:deploy"]
       containers:
         - name: users-service
           image: outbib-users-service:dev

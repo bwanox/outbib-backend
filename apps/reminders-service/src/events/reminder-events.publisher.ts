@@ -10,9 +10,14 @@ export const ReminderEventNames = {
 export type ReminderEventName = (typeof ReminderEventNames)[keyof typeof ReminderEventNames];
 
 export type ReminderDueV1PayloadDto = {
-  reminderId: string;
+  // Backward compatibility: historically used by this service.
+  reminderId?: string;
+
+  // Preferred identifier going forward.
+  sourceId: string;
+
   userId: string;
-  type: 'MEDICATION' | 'APPOINTMENT';
+  type: 'MEDICATION' | 'APPOINTMENT' | 'WATER_HABIT' | 'NOTE';
   title: string;
   scheduledFor: string; // ISO
   triggeredAt: string; // ISO
