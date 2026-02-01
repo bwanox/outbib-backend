@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # --- TEAM SERVICES (Postgres, Redis, Core Apps) ---
+  # --- TEAM SERVICES ---
   postgres:
     image: postgres:15
     container_name: outbib-postgres
@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: outbib
       POSTGRES_DB: outbib
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
@@ -44,13 +44,17 @@ services:
       NODE_ENV: production
       PORT: "3000"
       DATABASE_URL: postgresql://outbib:outbib@postgres:5432/outbib_auth
-      JWT_SECRET: ${JWT_SECRET:-dev-secret}
       NATS_DISABLED: "true"
     ports:
       - "3000:3000"
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - outbib-network
 
@@ -68,6 +72,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - outbib-network
 
@@ -112,6 +121,26 @@ services:
     networks:
       - outbib-network
 
+  # --- DOCTORS SERVICE (Team's Update) ---
+  doctors-service:
+    build:
+      context: .
+      dockerfile: apps/doctors-service/Dockerfile
+    container_name: outbib-doctors-service
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: postgresql://outbib:outbib@postgres:5432/outbib_doctors
+      JWT_SECRET: ${JWT_SECRET:-dev-secret}
+      NATS_DISABLED: "true"
+    ports:
+      - "3002:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - outbib-network
+
   api-gateway:
     build:
       context: .
@@ -122,32 +151,36 @@ services:
       PORT: "3000"
       AUTH_URL: http://auth-service:3000
       USERS_URL: http://users-service:3000
+      DOCTORS_URL: http://doctors-service:3000
     ports:
       - "8080:3000"
     depends_on:
       auth-service:
-        condition: service_started
+        condition: service_healthy
       users-service:
+        condition: service_healthy
+      doctors-service:
         condition: service_started
     networks:
       - outbib-network
 
-  # --- YOUR NEW SERVICE ---
+  # --- YOUR AI SERVICE ---
   ai-service:
     build:
       context: .
-      dockerfile: apps/ai-service/Dockerfile
+      # Point to the ROOT Dockerfile we just fixed
+      dockerfile: Dockerfile
       args:
         APP_NAME: ai-service
-    environment:
-      PORT: "3000"
-      DATABASE_URL: postgresql://outbib:outbib@postgres:5432/outbib
-      REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET:-dev-secret}
+    command: node dist/apps/ai-service/main
+    container_name: outbib-ai-service
     ports:
-      - "3009:3000"
+      - "3009:3009"
     env_file:
       - ./apps/ai-service/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - outbib-network
 

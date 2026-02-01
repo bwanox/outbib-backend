@@ -1,0 +1,64 @@
+// apps/doctors-service/prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Doctor {
+  id          String   @id @default(uuid())
+  slug        String   @unique // friendly-url-for-sharing
+  
+  // --- STATUS ---
+  isClaimed   Boolean  @default(false)
+  isVerified  Boolean  @default(false)
+  ownerId     String?  // ID of the User (Doctor) if claimed
+
+  // --- SOURCE DATA (Read-Only from Maps) ---
+  // Neutral and informative as per Legal Doc 09-08
+  sourceId        String?  @unique // Google Place ID or similar
+  sourceName      String
+  sourceAddress   String
+  sourcePhone     String?
+  sourceWebsite   String?
+  sourceGeoLat    Float
+  sourceGeoLng    Float
+  
+  lastImportedAt  DateTime @default(now())
+
+  // --- OUTBIB DATA (Editable by Doctor) ---
+  // These fields override the source data when present
+  displayName     String?  
+  bio             String?  @db.Text
+  specialties     String[] // e.g. ["Cardiology", "General"]
+  languages       String[]
+  insurance       String[] // ["CNSS", "CNOPS"]
+  consultationFee Decimal? 
+
+  // --- RELATIONS ---
+  availabilities  Availability[]
+
+  // --- METADATA ---
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Geospatial Index for "Search Nearby"
+  @@index([sourceGeoLat, sourceGeoLng])
+}
+
+model Availability {
+  id        String   @id @default(uuid())
+  doctorId  String
+  doctor    Doctor   @relation(fields: [doctorId], references: [id])
+  
+  dayOfWeek Int      // 0=Sunday, 1=Monday...
+  startTime String   // "09:00"
+  endTime   String   // "17:00"
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
