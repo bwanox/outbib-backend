@@ -61,6 +61,7 @@ Response style (strict):
 - Include a "What to track today" mini-checklist (bullets).
 - Include a "When to seek care" section with specific red flags.
 - If any red flags are already present (e.g., fever + vision changes, severe/worst headache, confusion, neck stiffness, head injury), clearly recommend urgent care or emergency evaluation.
+- Even if urgent, still give 2–4 safe comfort steps (hydration, rest, avoid triggers) while advising urgent care.
 - Ask ONE next-step question only if more clarification is needed; otherwise set stage="ENOUGH".
 `;
 
@@ -79,6 +80,8 @@ Schema:
 Rules:
 - "answer" must be a single concise response with safety disclaimers when needed.
 - "stage" must be "NEED_MORE" until you have enough clarifying info to give a complete response; use "ENOUGH" only when no more questions are needed.
+- If urgent red flags are present, set stage="ENOUGH" and do NOT ask further questions.
+- If the user explicitly asks for immediate relief (e.g., "help now", "ease it now", "relief"), provide relief steps first and avoid extra questions unless needed for safety.
 - "nextStep.prompt" should ask one clear, specific question to guide the user step-by-step.
 - "nextStep.options" is optional (0-4 short choices) and should be omitted if not helpful.
 - If stage is "ENOUGH", set nextStep to the final check question: "Do you have any other questions for me right now?"
@@ -107,11 +110,22 @@ Rules:
     ];
 
     const context = this.parseContext(sanitizedHistory);
+    const analysis = this.analyzeCollectedAnswers(context?.collectedAnswers ?? [], sanitizedHistory);
     if (context?.answeredNoToLastNextStep) {
       fullConversation.splice(3, 0, {
         role: 'system',
         content:
           'The user answered "no" to the previous next-step question. Do NOT repeat that question. Ask a different clarifying question or, if enough info, set stage="ENOUGH" and provide guidance.',
+      });
+    }
+
+    if (context?.collectedAnswers?.length) {
+      fullConversation.splice(3, 0, {
+        role: 'system',
+        content:
+          `Collected user answers so far (use to decide if enough info):\n${context.collectedAnswers
+            .map((a: string) => `- ${a}`)
+            .join('\n')}`,
       });
     }
 
@@ -174,7 +188,7 @@ Rules:
         const parsed = this.safeParseJson(content);
         if (parsed?.answer) {
           const withKeyPoints = this.ensureKeyPoints(parsed, sanitizedHistory);
-          const enforced = this.ensureNextStep(withKeyPoints, sanitizedHistory, context ?? undefined);
+          const enforced = this.enforcePolicy(withKeyPoints, sanitizedHistory, context ?? undefined, analysis);
           if (userId && withKeyPoints.keyPoints?.length) {
             await this.memoryService.upsertMemory(userId, withKeyPoints.keyPoints);
             if (chatId) {
@@ -190,7 +204,7 @@ Rules:
             await this.memoryService.upsertChatMemory(userId, chatId, fallback.keyPoints);
           }
         }
-        return this.ensureNextStep(fallback, sanitizedHistory, context ?? undefined);
+        return this.enforcePolicy(fallback, sanitizedHistory, context ?? undefined, analysis);
       } catch (error: any) {
         // FIX 2: Safe type casting to satisfy 'unsafe assignment' lint error
         const errorData = error.response as { status?: number; data?: any };
@@ -248,7 +262,7 @@ Rules:
       return {
         ...parsed,
         nextStep: { prompt: this.FINAL_CHECK_PROMPT },
-        stage: 'NEED_MORE',
+        stage: 'ENOUGH',
       };
     }
 
@@ -263,6 +277,130 @@ Rules:
       stage: 'NEED_MORE',
       nextStep: fallback,
     };
+  }
+
+  private enforcePolicy(
+    parsed: AiAnswer,
+    history: ChatMessage[],
+    context?: { answeredNoToLastNextStep?: boolean; lastNextStepPrompt?: string; collectedAnswers?: string[] },
+    analysis?: { urgent: boolean; enough: boolean; missing: string[]; wantsReliefNow?: boolean }
+  ): AiAnswer {
+    const base = this.ensureNextStep(parsed, history, context);
+    const normalized = this.ensureAnswerSections(base);
+
+    if (analysis?.urgent || analysis?.wantsReliefNow) {
+      return {
+        ...normalized,
+        stage: 'ENOUGH',
+        nextStep:
+          context?.answeredNoToLastNextStep && context.lastNextStepPrompt === this.FINAL_CHECK_PROMPT
+            ? null
+            : { prompt: this.FINAL_CHECK_PROMPT },
+      };
+    }
+
+    if (analysis && !analysis.enough) {
+      const nextStep = this.pickMissingQuestion(analysis.missing, history);
+      return {
+        ...normalized,
+        stage: 'NEED_MORE',
+        nextStep,
+      };
+    }
+
+    return {
+      ...normalized,
+      stage: 'ENOUGH',
+      nextStep:
+        context?.answeredNoToLastNextStep && context?.lastNextStepPrompt === this.FINAL_CHECK_PROMPT
+          ? null
+          : { prompt: this.FINAL_CHECK_PROMPT },
+    };
+  }
+
+  private ensureAnswerSections(parsed: AiAnswer): AiAnswer {
+    const text = parsed.answer || '';
+    const hasTrack = /what to track today/i.test(text);
+    const hasCare = /when to seek care/i.test(text);
+    if (hasTrack && hasCare) return parsed;
+
+    const extra = [
+      hasTrack
+        ? null
+        : 'What to track today:\n- When it started\n- Severity (0–10)\n- Triggers or recent changes\n- Any meds taken',
+      hasCare
+        ? null
+        : 'When to seek care:\n- Severe or worsening symptoms\n- Trouble breathing, confusion, or fainting\n- New neurologic symptoms (vision changes, weakness)',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    return {
+      ...parsed,
+      answer: text ? `${text}\n\n${extra}` : extra,
+    };
+  }
+
+  private analyzeCollectedAnswers(collected: string[], history: ChatMessage[]) {
+    const userText = history.filter((m) => m.role === 'user').map((m) => m.content).join(' | ');
+    const combined = `${collected.join(' | ')} | ${userText}`.toLowerCase();
+
+    const hasDuration =
+      /(minutes?|hours?|days?|weeks?|months?|years?|just started|since|for\s+\d+)/i.test(combined);
+    const hasSeverity = /(mild|moderate|severe|worst|\b[0-9](?:\/10)?\b)/i.test(combined);
+    const redFlagTerms = [
+      'fever',
+      'vision',
+      'nausea',
+      'vomit',
+      'head injury',
+      'trauma',
+      'confusion',
+      'neck stiffness',
+      'chest pain',
+      'trouble breathing',
+      'shortness of breath',
+      'faint',
+      'weakness',
+      'numb',
+      'seizure',
+    ];
+    const hasRedFlagAnswer = redFlagTerms.some((t) => combined.includes(t));
+    const wantsReliefNow = /(help|relief|ease|what can i do now|need help now|right now)/.test(combined);
+    const urgent = /severe|worst|confusion|neck stiffness|chest pain|trouble breathing|shortness of breath|faint|seizure/.test(combined) ||
+      (combined.includes('fever') && combined.includes('vision'));
+
+    const missing: string[] = [];
+    if (!hasRedFlagAnswer) missing.push('redflags');
+    if (!hasDuration) missing.push('duration');
+    if (!hasSeverity) missing.push('severity');
+
+    const enough = missing.length === 0;
+
+    return { urgent, enough, missing, wantsReliefNow };
+  }
+
+  private pickMissingQuestion(missing: string[], history: ChatMessage[]) {
+    if (missing.includes('redflags')) {
+      return {
+        prompt: 'Any of these right now: fever, nausea/vomiting, vision changes, or head injury?',
+        options: ['No', 'Fever', 'Nausea/vomiting', 'Vision changes', 'Head injury'],
+      };
+    }
+    if (missing.includes('duration')) {
+      return {
+        prompt: 'How long has this been going on?',
+        options: ['Just started', 'Hours', 'Days', 'Weeks+'],
+      };
+    }
+    if (missing.includes('severity')) {
+      return {
+        prompt: 'How severe is it from 0–10?',
+        options: ['1–3', '4–6', '7–8', '9–10'],
+      };
+    }
+    const lastUser = [...history].reverse().find((m) => m.role === 'user')?.content ?? '';
+    return this.fallbackNextStep(lastUser);
   }
 
   private ensureKeyPoints(parsed: AiAnswer, history: ChatMessage[]): AiAnswer {
@@ -314,6 +452,7 @@ Rules:
         lastNextStepPrompt?: string;
         resetMemory?: boolean;
         chatId?: string;
+        collectedAnswers?: string[];
       };
     } catch {
       return null;
