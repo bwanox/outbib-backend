@@ -1,0 +1,78 @@
+generator client {
+  provider = "prisma-client-js"
+  // Isolate generated client per-service to avoid schema/type conflicts across workspaces.
+  output   = "../node_modules/.prisma/pharmacies-service"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PharmacySource {
+  GOOGLE_MAPS
+  MANUAL
+}
+
+enum SyncJobStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+model Pharmacy {
+  id               String   @id @default(uuid())
+  placeId          String   @unique
+  name             String
+  address          String
+  city             String
+  country          String
+  lat              Float
+  lng              Float
+  phone            String?
+  website          String?
+  rating           Float?
+  ratingsCount     Int?
+  openingHoursJson Json?
+  isOpenNow        Boolean?
+  types            String[]
+  source           PharmacySource @default(GOOGLE_MAPS)
+  lastSyncedAt     DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  reviews PharmacyReview[]
+
+  @@index([city])
+}
+
+model PharmacyReview {
+  id                      String   @id @default(uuid())
+  pharmacyId              String
+  authorName              String?
+  rating                  Float?
+  text                    String?
+  relativeTimeDescription String?
+  time                    DateTime?
+  createdAt               DateTime @default(now())
+
+  pharmacy Pharmacy @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
+
+  @@unique([pharmacyId, authorName, time])
+}
+
+model SyncJob {
+  id            String        @id @default(uuid())
+  city          String
+  status        SyncJobStatus @default(PENDING)
+  startedAt     DateTime?     @default(now())
+  finishedAt    DateTime?
+  fetchedCount  Int?
+  upsertedCount Int?
+  errorsJson    Json?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([city])
+}

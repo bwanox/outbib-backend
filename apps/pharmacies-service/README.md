@@ -1,98 +1,160 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# pharmacies-service (Outbib)
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Pharmacy discovery + caching service for **Outbib**.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+This service syncs pharmacies from **Google Maps / Places API** for a given city, stores them in **PostgreSQL** as the source of truth, and uses **Redis** for fast reads. The API serves local data after sync to reduce external API calls.
 
-## Description
+- **Service API base**: `http://localhost:3004` (docker-compose)
+- **Gateway API base**: `http://localhost:8080/pharmacies`
+- **Health**: `GET /health` → `{"status":"ok"}`
+- **Swagger**: `GET /docs`
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+---
 
-## Project setup
+## Technology
 
-```bash
-$ npm install
+- **Runtime**: Node.js 20
+- **Framework**: NestJS
+- **Language**: TypeScript
+- **Database**: PostgreSQL
+- **ORM**: Prisma (`prisma`, `@prisma/client`)
+- **Cache**: Redis (list + detail caching)
+- **API docs**: Swagger UI at `/docs`
+- **Validation**: `class-validator` + `class-transformer` via Nest global `ValidationPipe`
+
+---
+
+## Data model (Prisma)
+
+Core entities:
+
+- **Pharmacy**
+  - `placeId` (unique), `name`, `address`, `city`, `country`, `lat`, `lng`
+  - `phone`, `website`, `rating`, `ratingsCount`
+  - `openingHoursJson`, `isOpenNow`, `types`, `source`, `lastSyncedAt`
+- **PharmacyReview** (optional)
+  - `authorName`, `rating`, `text`, `relativeTimeDescription`, `time`
+- **SyncJob**
+  - `city`, `status`, `startedAt`, `finishedAt`, `fetchedCount`, `upsertedCount`, `errorsJson`
+
+See `prisma/schema.prisma` for full schema.
+
+---
+
+## Environment variables
+
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `DATABASE_URL` | yes | - | Postgres connection string |
+| `REDIS_URL` | no | `redis://redis:6379` | Redis connection string |
+| `GOOGLE_MAPS_API_KEY` | yes (for sync) | - | Google Places API key |
+| `MAPS_DEFAULT_COUNTRY` | no | - | Optional default country for sync |
+| `SYNC_CONCURRENCY` | no | `3` | Max parallel detail requests |
+
+### Local `.env` (dev)
+
+This repo includes `apps/pharmacies-service/.env` for local dev with Docker:
+
+```
+DATABASE_URL=postgresql://outbib:outbib@localhost:5432/outbib_pharmacies
+REDIS_URL=redis://localhost:6379
+GOOGLE_MAPS_API_KEY=
+MAPS_DEFAULT_COUNTRY=
+SYNC_CONCURRENCY=3
 ```
 
-## Compile and run the project
+---
+
+## API endpoints
+
+### Public read endpoints
+
+- `GET /pharmacies`
+  - Query: `city` (required), optional `q`, `page`, `limit`, `minRating`
+- `GET /pharmacies/nearby`
+  - Query: `lat`, `lng`, optional `radiusMeters` (default 3000), `limit`
+- `GET /pharmacies/:id`
+- `GET /pharmacies/by-place/:placeId`
+
+### Sync/admin endpoints
+
+- `POST /pharmacies/sync`
+  - Body: `{ "city": string, "country"?: string, "force"?: boolean }`
+  - Triggers Google Places sync + upserts
+- `GET /pharmacies/sync/status?city=...`
+
+---
+
+## Caching
+
+- `GET /pharmacies`: cached by `city + page + limit + q + minRating` for 1 hour
+- `GET /pharmacies/nearby`: cached by rounded coords + radius for 1 hour
+- `GET /pharmacies/:id` and `GET /pharmacies/by-place/:placeId`: cached for 24 hours
+
+Cache entries are invalidated on sync (best-effort, by prefix).
+
+---
+
+## Running locally
+
+This service expects Postgres + Redis. Use the shared `docker-compose.yml` at the repo root, or run services manually.
+
+### Docker Compose
+
+The root `docker-compose.yml` includes:
+- `pharmacies-migrate` (runs `prisma migrate deploy`)
+- `pharmacies-service` (port `3004:3000`)
+- Postgres + Redis
+
+### Prisma
 
 ```bash
-# development
-$ npm run start
+# From repo root
+DATABASE_URL=postgresql://outbib:outbib@localhost:5432/outbib_pharmacies \
+  npx prisma migrate dev --schema apps/pharmacies-service/prisma/schema.prisma --name init
 
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+DATABASE_URL=postgresql://outbib:outbib@localhost:5432/outbib_pharmacies \
+  npx prisma generate --schema apps/pharmacies-service/prisma/schema.prisma
 ```
 
-## Run tests
+### Start service
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+# From repo root
+npm -w pharmacies-service run start:dev
 ```
 
-## Deployment
+### Tests (watchman note)
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+If you hit a Watchman permission error, run:
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+npm -w pharmacies-service test -- --watchman=false
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+---
 
-## Resources
+## Example sync
 
-Check out a few resources that may come in handy when working with NestJS:
+```bash
+curl -X POST http://localhost:3000/pharmacies/sync \
+  -H "Content-Type: application/json" \
+  -d '{"city":"Casablanca","country":"Morocco"}'
+```
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+### Via API Gateway
 
-## Support
+```bash
+curl -X POST http://localhost:8080/pharmacies/sync \
+  -H "Content-Type: application/json" \
+  -d '{"city":"Casablanca","country":"Morocco"}'
+```
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+---
 
-## Stay in touch
+## Notes
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+- **Postgres** is the source of truth. Redis is a performance layer.
+- Google Places API is only used for initial sync or periodic refresh.
+- The Maps client is rate-limit friendly with basic concurrency control and pagination handling.
+- API Gateway proxies `/pharmacies/*` to the service. Set `PHARMACIES_URL` in the gateway environment (already wired in docker-compose).

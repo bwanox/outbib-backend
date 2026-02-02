@@ -11,6 +11,9 @@ RUN npm ci --include=dev
 # Copy sources
 COPY apps/pharmacies-service apps/pharmacies-service
 
+# Generate Prisma client for this service
+RUN npx prisma generate --schema apps/pharmacies-service/prisma/schema.prisma
+
 # Build only what we need
 RUN npm -w pharmacies-service run build
 
@@ -29,9 +32,15 @@ RUN npm ci --omit=dev
 # Copy compiled output
 COPY --from=builder /app/apps/pharmacies-service/dist ./dist
 
+# Copy Prisma schema for migrate container usage
+COPY --from=builder /app/apps/pharmacies-service/prisma ./apps/pharmacies-service/prisma
+
+# Copy Prisma generated client for runtime resolution
+COPY --from=builder /app/apps/pharmacies-service/node_modules/.prisma ./apps/pharmacies-service/node_modules/.prisma
+COPY --from=builder /app/apps/pharmacies-service/node_modules/.prisma/pharmacies-service ./node_modules/.prisma/client
+
 # Copy workspace node_modules so runtime resolution works
 COPY --from=builder /app/apps/pharmacies-service/node_modules ./apps/pharmacies-service/node_modules
 
 EXPOSE 3000
 CMD ["node","dist/main.js"]
-

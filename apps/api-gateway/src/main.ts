@@ -111,7 +111,17 @@ async function bootstrap() {
   app.use('/api/auth', createProxyMiddleware(authProxyOptions(AUTH_URL, 'auth-service')));
   app.use('/users', createProxyMiddleware(usersProxyOptions(USERS_URL, 'users-service')));
   app.use('/doctors', createProxyMiddleware(proxyOptions(DOCTORS_URL, 'doctors', 'doctors-service')));
-  app.use('/pharmacies', createProxyMiddleware(proxyOptions(PHARMACIES_URL, 'pharmacies', 'pharmacies-service')));
+  // Pharmacies service expects `/pharmacies/*` paths (controller is mounted under `/pharmacies`).
+  // Add `/pharmacies` back after Express strips the mount path.
+  const pharmaciesProxyOptions = (target: string, serviceName: string) =>
+    ({
+      target,
+      changeOrigin: true,
+      pathRewrite: (path: string) => `/pharmacies${path}`,
+      onError: proxyErrorHandler(serviceName),
+    }) as any;
+
+  app.use('/pharmacies', createProxyMiddleware(pharmaciesProxyOptions(PHARMACIES_URL, 'pharmacies-service')));
   app.use('/reminders', createProxyMiddleware(remindersProxyOptions(REMINDERS_URL, 'reminders-service')));
   app.use('/emergencies', createProxyMiddleware(proxyOptions(EMERGENCIES_URL, 'emergencies', 'emergencies-service')));
   const aiTimeoutMs = Number(env("AI_PROXY_TIMEOUT_MS", "8000"));
