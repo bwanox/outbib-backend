@@ -38,8 +38,9 @@ export class PharmaciesService {
     const minRating = query.minRating;
 
     const cacheKey = this.buildListCacheKey({ city, page, limit, q, minRating });
-    const cached = await this.getCache(cacheKey);
-    if (cached) return cached;
+    const cached = await this.getCache<any>(cacheKey);
+    const autoSyncEnabled = this.getBoolEnv('PHARMACIES_AUTO_SYNC_ON_MISS', true);
+    if (cached && !(autoSyncEnabled && cached?.total === 0)) return cached;
 
     const where: Record<string, any> = { city: { equals: city, mode: 'insensitive' } };
     if (q) {
@@ -62,7 +63,6 @@ export class PharmaciesService {
       }),
     ]);
 
-    const autoSyncEnabled = this.getBoolEnv('PHARMACIES_AUTO_SYNC_ON_MISS', true);
     const canAutoSync =
       autoSyncEnabled &&
       total === 0 &&
