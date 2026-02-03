@@ -10,5 +10,9 @@
     "build": "npm -ws run build",
     "lint": "npm -ws run lint",
     "test": "npm -ws run test"
+  },
+  "dependencies": {
+    "@nestjs/axios": "^4.0.1",
+    "axios": "^1.13.4"
   }
 }
