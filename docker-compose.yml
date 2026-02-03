@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # --- TEAM SERVICES (Postgres, Redis, Core Apps) ---
+  # --- INFRASTRUCTURE ---
   postgres:
     image: postgres:15
     container_name: outbib-postgres
@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: outbib
       POSTGRES_DB: outbib
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
@@ -35,6 +35,7 @@ services:
     networks:
       - outbib-network
 
+  # --- CORE SERVICES ---
   auth-service:
     build:
       context: .
@@ -43,14 +44,18 @@ services:
     environment:
       NODE_ENV: production
       PORT: "3000"
-      DATABASE_URL: postgresql://outbib:outbib@postgres:5432/outbib_auth
-      JWT_SECRET: ${JWT_SECRET:-dev-secret}
+      DATABASE_URL: postgresql://outbib:outbib@postgres:5432/outbib_users
       NATS_DISABLED: "true"
     ports:
       - "3000:3000"
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - outbib-network
 
@@ -68,6 +73,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - outbib-network
 
@@ -155,6 +165,104 @@ services:
     networks:
       - outbib-network
 
+  # --- PHARMACIES SERVICE (From Main) ---
+  pharmacies-migrate:
+    build:
+      context: .
+      dockerfile: apps/pharmacies-service/Dockerfile
+    container_name: outbib-pharmacies-migrate
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://outbib:outbib@postgres:5432/outbib_pharmacies
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["sh", "-c", "npx prisma migrate deploy --schema apps/pharmacies-service/prisma/schema.prisma"]
+    restart: "no"
+    networks:
+      - outbib-network
+
+  pharmacies-service:
+    build:
+      context: .
+      dockerfile: apps/pharmacies-service/Dockerfile
+    container_name: outbib-pharmacies-service
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: postgresql://outbib:outbib@postgres:5432/outbib_pharmacies
+      REDIS_URL: redis://redis:6379
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-AIzaSyA75Z-7INV0Kif6vnrgdzABhWHFYHuBZGc}
+      MAPS_DEFAULT_COUNTRY: ${MAPS_DEFAULT_COUNTRY:-}
+      SYNC_CONCURRENCY: ${SYNC_CONCURRENCY:-3}
+    env_file:
+      - ./apps/pharmacies-service/.env
+    ports:
+      - "3004:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      pharmacies-migrate:
+        condition: service_completed_successfully
+    networks:
+      - outbib-network
+
+  # --- DOCTORS & AI SERVICES (From Feature Branch) ---
+  doctors-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_NAME: doctors-service
+    container_name: outbib-doctors-service
+    # THE FIX: Generate client at runtime, THEN start the app
+    command: sh -c "npx prisma generate --schema=apps/doctors-service/prisma/schema.prisma && node dist/apps/doctors-service/main"
+    env_file:
+      - ./apps/doctors-service/.env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: postgresql://outbib:outbib@postgres:5432/outbib_doctors
+      JWT_SECRET: ${JWT_SECRET:-dev-secret}
+      NATS_DISABLED: "true"
+    ports:
+      - "3002:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/dist
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - outbib-network
+
+  ai-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_NAME: ai-service
+    container_name: outbib-ai-service
+    # THE FIX: Generate client at runtime, THEN start the app
+    command: sh -c "npx prisma generate --schema=apps/ai-service/prisma/schema.prisma && node dist/apps/ai-service/main"
+    ports:
+      - "3009:3009"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/dist
+    env_file:
+      - ./apps/ai-service/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - outbib-network
+
+  # --- GATEWAY (Merged) ---
   api-gateway:
     build:
       context: .
@@ -165,33 +273,19 @@ services:
       PORT: "3000"
       AUTH_URL: http://auth-service:3000
       USERS_URL: http://users-service:3000
+      DOCTORS_URL: http://doctors-service:3000
       PHARMACIES_URL: http://pharmacies-service:3000
     ports:
       - "8080:3000"
     depends_on:
       auth-service:
-        condition: service_started
+        condition: service_healthy
       users-service:
+        condition: service_healthy
+      doctors-service:
         condition: service_started
-    networks:
-      - outbib-network
-
-  # --- YOUR NEW SERVICE ---
-  ai-service:
-    build:
-      context: .
-      dockerfile: apps/ai-service/Dockerfile
-      args:
-        APP_NAME: ai-service
-    environment:
-      PORT: "3000"
-      DATABASE_URL: postgresql://outbib:outbib@postgres:5432/outbib
-      REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET:-dev-secret}
-    ports:
-      - "3009:3000"
-    env_file:
-      - ./apps/ai-service/.env
+      pharmacies-service:
+        condition: service_started
     networks:
       - outbib-network
 

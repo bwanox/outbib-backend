@@ -1,0 +1,60 @@
+// apps/doctors-service/prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum DoctorStatus {
+  UNCLAIMED // Imported from Maps, no owner
+  PENDING   // Doctor claimed it, waiting for Admin
+  VERIFIED  // Doctor owns the profile
+  REJECTED  // Claim rejected
+}
+
+model Doctor {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // --- 1. IMPORTED DATA (Read-Only from Maps) ---
+  // Source of Truth: Google Maps / External API
+  googlePlaceId String? @unique // To prevent duplicate imports
+  name          String
+  address       String
+  city          String
+  latitude      Float
+  longitude     Float
+  phone         String?
+  website       String?
+  mapsUrl       String?
+  
+  // JSON field to store raw opening hours from Maps
+  openingHours  Json?   
+
+  // --- 2. OUTBIB DATA (Editable by Owner) ---
+  // Source of Truth: Outbib Database
+  status        DoctorStatus @default(UNCLAIMED)
+  ownerId       String?      // Link to User ID (Auth Service)
+  
+  bio           String?      @db.Text
+  specialties   String[]     // Array of strings: ["Cardiology", "Pediatrics"]
+  languages     String[]     // ["Arabic", "French"]
+  
+  // Financial info
+  fees          Json?        // { consultation: 300, checkup: 150 }
+  insurance     String[]     // Accepted insurance providers
+
+  // --- 3. METADATA ---
+  isFeatured    Boolean      @default(false)
+  rating        Float        @default(0)
+  reviewCount   Int          @default(0)
+
+  @@index([city])
+  @@index([specialties])
+  @@index([status])
+}
