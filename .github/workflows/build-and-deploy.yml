@@ -32,37 +32,37 @@ jobs:
         include:
           - name: auth-service
             image: outbib-auth-service
-            dockerfile: outbib-backend/apps/auth-service/Dockerfile
-            context: outbib-backend
+            dockerfile: apps/auth-service/Dockerfile
+            context: .
           - name: users-service
             image: outbib-users-service
-            dockerfile: outbib-backend/apps/users-service/Dockerfile
-            context: outbib-backend
+            dockerfile: apps/users-service/Dockerfile
+            context: .
           - name: reminders-service
             image: outbib-reminders-service
-            dockerfile: outbib-backend/apps/reminders-service/Dockerfile
-            context: outbib-backend
+            dockerfile: apps/reminders-service/Dockerfile
+            context: .
           - name: doctors-service
             image: outbib-doctors-service
-            dockerfile: outbib-backend/Dockerfile
-            context: outbib-backend
+            dockerfile: Dockerfile
+            context: .
             build_args: APP_NAME=doctors-service
           - name: pharmacies-service
             image: outbib-pharmacies-service
-            dockerfile: outbib-backend/apps/pharmacies-service/Dockerfile
-            context: outbib-backend
+            dockerfile: apps/pharmacies-service/Dockerfile
+            context: .
           - name: ai-service
             image: outbib-ai-service
-            dockerfile: outbib-backend/apps/ai-service/Dockerfile
-            context: outbib-backend
+            dockerfile: apps/ai-service/Dockerfile
+            context: .
           - name: api-gateway
             image: outbib-api-gateway
-            dockerfile: outbib-backend/apps/api-gateway/Dockerfile
-            context: outbib-backend
+            dockerfile: apps/api-gateway/Dockerfile
+            context: .
           - name: emergencies-service
             image: outbib-emergencies-service
-            dockerfile: outbib-backend/apps/emergencies-service/Dockerfile
-            context: outbib-backend
+            dockerfile: apps/emergencies-service/Dockerfile
+            context: .
 
     steps:
       - name: Checkout
@@ -127,7 +127,7 @@ jobs:
             exit 0
           fi
           TMP_DIR="$(mktemp -d)"
-          cp -R outbib-backend/k8s/base/* "$TMP_DIR/"
+          cp -R k8s/base/* "$TMP_DIR/"
           for svc in auth users reminders doctors pharmacies ai api-gateway emergencies; do
             sed -i "s|ghcr.io/bwanox/outbib-${svc}:git-sha|ghcr.io/bwanox/outbib-${svc}:${GITHUB_SHA}|g" "$TMP_DIR"/*.yaml
           done
