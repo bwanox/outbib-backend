@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: ai-service
-          image: outbib-ai-service:dev
+          image: outbib-ai-service:dev-20260204-1655
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000
@@ -31,13 +31,13 @@ spec:
               value: "postgresql://outbib:outbib@postgres:5432/outbib_ai"
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ai/health
               port: 3000
             initialDelaySeconds: 10
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /health
+              path: /ai/health
               port: 3000
             initialDelaySeconds: 20
             periodSeconds: 10

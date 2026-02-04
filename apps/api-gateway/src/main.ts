@@ -106,11 +106,20 @@ async function bootstrap() {
       onError: proxyErrorHandler(serviceName),
     }) as any;
 
+  // Doctors service expects `/doctors/*` paths (controller is mounted under `/doctors`).
+  const doctorsProxyOptions = (target: string, serviceName: string) =>
+    ({
+      target,
+      changeOrigin: true,
+      pathRewrite: (path: string) => `/doctors${path}`,
+      onError: proxyErrorHandler(serviceName),
+    }) as any;
+
   // Proxy routes
   app.use('/auth', createProxyMiddleware(authProxyOptions(AUTH_URL, 'auth-service')));
   app.use('/api/auth', createProxyMiddleware(authProxyOptions(AUTH_URL, 'auth-service')));
   app.use('/users', createProxyMiddleware(usersProxyOptions(USERS_URL, 'users-service')));
-  app.use('/doctors', createProxyMiddleware(proxyOptions(DOCTORS_URL, 'doctors', 'doctors-service')));
+  app.use('/doctors', createProxyMiddleware(doctorsProxyOptions(DOCTORS_URL, 'doctors-service')));
   // Pharmacies service expects `/pharmacies/*` paths (controller is mounted under `/pharmacies`).
   // Add `/pharmacies` back after Express strips the mount path.
   const pharmaciesProxyOptions = (target: string, serviceName: string) =>

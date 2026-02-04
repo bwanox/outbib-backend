@@ -1,7 +1,7 @@
 generator client {
   provider = "prisma-client-js"
-  // Isolate generated client per-service to avoid schema/type conflicts across workspaces.
-  output   = "../node_modules/.prisma/reminders-service"
+  // Keep Prisma Client in the default location expected by @prisma/client.
+  output   = "../node_modules/.prisma/client"
 }
 
 datasource db {

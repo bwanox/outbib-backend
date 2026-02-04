@@ -36,10 +36,16 @@ RUN npm ci --omit=dev
 # Copy compiled output
 COPY --from=builder /app/apps/users-service/dist ./dist
 
-# Copy Prisma schema + generated client/engines
-COPY --from=builder /app/apps/users-service/prisma ./prisma
-COPY --from=builder /app/apps/users-service/node_modules/.prisma ./apps/users-service/node_modules/.prisma
-COPY --from=builder /app/apps/users-service/node_modules/.prisma/users-service ./node_modules/.prisma/client
+# Copy Prisma schema into the workspace folder
+COPY --from=builder /app/apps/users-service/prisma ./apps/users-service/prisma
+
+# Copy generated Prisma client/engines into root node_modules for runtime resolution
+COPY --from=builder /app/apps/users-service/node_modules/.prisma /app/node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma /app/node_modules/@prisma
+
+# Also copy into workspace node_modules for tools/scripts that use NODE_PATH
+COPY --from=builder /app/node_modules/.prisma /app/apps/users-service/node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma /app/apps/users-service/node_modules/@prisma
 
 # Copy workspace node_modules and contracts dist so runtime resolution works
 COPY --from=builder /app/apps/users-service/node_modules ./apps/users-service/node_modules

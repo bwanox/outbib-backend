@@ -11,6 +11,9 @@ RUN npm ci --include=dev
 # Copy source
 COPY apps/ai-service apps/ai-service
 
+# Generate Prisma client before build (required for PrismaService)
+RUN npx prisma generate --schema apps/ai-service/prisma/schema.prisma
+
 # Build only this workspace
 RUN npm -w ai-service run build
 
@@ -28,9 +31,14 @@ RUN npm ci --omit=dev
 # Copy compiled output
 COPY --from=builder /app/apps/ai-service/dist ./dist
 
+# Copy Prisma client/engines into root + workspace node_modules for runtime resolution
+COPY --from=builder /app/node_modules/.prisma /app/node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma /app/node_modules/@prisma
+COPY --from=builder /app/node_modules/.prisma /app/apps/ai-service/node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma /app/apps/ai-service/node_modules/@prisma
+
 # Copy workspace node_modules so runtime resolves deps
 COPY --from=builder /app/apps/ai-service/node_modules ./apps/ai-service/node_modules
 
 EXPOSE 3009
 CMD ["node","dist/main.js"]
-

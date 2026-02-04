@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: outbib
+data:
+  01-create-dbs.sql: |
+    SELECT 'CREATE DATABASE outbib_auth'
+    WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'outbib_auth')\gexec
+    SELECT 'CREATE DATABASE outbib_users'
+    WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'outbib_users')\gexec
+    SELECT 'CREATE DATABASE outbib_reminders'
+    WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'outbib_reminders')\gexec
+    SELECT 'CREATE DATABASE outbib_doctors'
+    WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'outbib_doctors')\gexec
+    SELECT 'CREATE DATABASE outbib_pharmacies'
+    WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'outbib_pharmacies')\gexec
+    SELECT 'CREATE DATABASE outbib_ai'
+    WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'outbib_ai')\gexec
+    SELECT 'CREATE DATABASE outbib_emergencies'
+    WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'outbib_emergencies')\gexec

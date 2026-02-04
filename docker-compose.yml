@@ -165,51 +165,7 @@ services:
     networks:
       - outbib-network
 
-  # --- PHARMACIES SERVICE (From Main) ---
-  pharmacies-migrate:
-    build:
-      context: .
-      dockerfile: apps/pharmacies-service/Dockerfile
-    container_name: outbib-pharmacies-migrate
-    environment:
-      NODE_ENV: production
-      DATABASE_URL: postgresql://outbib:outbib@postgres:5432/outbib_pharmacies
-    depends_on:
-      postgres:
-        condition: service_healthy
-    command: ["sh", "-c", "npx prisma migrate deploy --schema apps/pharmacies-service/prisma/schema.prisma"]
-    restart: "no"
-    networks:
-      - outbib-network
-
-  pharmacies-service:
-    build:
-      context: .
-      dockerfile: apps/pharmacies-service/Dockerfile
-    container_name: outbib-pharmacies-service
-    environment:
-      NODE_ENV: production
-      PORT: "3000"
-      DATABASE_URL: postgresql://outbib:outbib@postgres:5432/outbib_pharmacies
-      REDIS_URL: redis://redis:6379
-      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-AIzaSyA75Z-7INV0Kif6vnrgdzABhWHFYHuBZGc}
-      MAPS_DEFAULT_COUNTRY: ${MAPS_DEFAULT_COUNTRY:-}
-      SYNC_CONCURRENCY: ${SYNC_CONCURRENCY:-3}
-    env_file:
-      - ./apps/pharmacies-service/.env
-    ports:
-      - "3004:3000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      pharmacies-migrate:
-        condition: service_completed_successfully
-    networks:
-      - outbib-network
-
-  # --- DOCTORS & AI SERVICES (From Feature Branch) ---
+# --- DOCTORS & AI SERVICES (From Feature Branch) ---
   doctors-service:
     build:
       context: .

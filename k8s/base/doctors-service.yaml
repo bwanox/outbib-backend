@@ -13,9 +13,39 @@ spec:
       labels:
         app: doctors-service
     spec:
+      initContainers:
+        - name: generate
+          image: outbib-doctors-service:dev-20260204-1520
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: outbib-config
+            - secretRef:
+                name: outbib-secrets
+          command:
+            - sh
+            - -lc
+            - |
+              npx prisma generate --schema=/app/prisma/schema.prisma
+        - name: migrate
+          image: outbib-doctors-service:dev-20260204-1520
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: outbib-config
+            - secretRef:
+                name: outbib-secrets
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://outbib:outbib@postgres:5432/outbib_doctors"
+          command:
+            - sh
+            - -lc
+            - |
+              npx prisma migrate deploy --schema=/app/prisma/schema.prisma
       containers:
         - name: doctors-service
-          image: outbib-doctors-service:dev
+          image: outbib-doctors-service:dev-20260204-1520
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000
@@ -29,6 +59,8 @@ spec:
               value: "3000"
             - name: DATABASE_URL
               value: "postgresql://outbib:outbib@postgres:5432/outbib_doctors"
+            - name: APP_NAME
+              value: "doctors-service"
           readinessProbe:
             httpGet:
               path: /health

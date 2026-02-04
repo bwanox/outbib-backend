@@ -46,20 +46,27 @@ COPY packages/contracts/package.json packages/contracts/package.json
 COPY apps/auth-service/package.json apps/auth-service/package.json
 RUN npm ci --omit=dev
 
-# Copy compiled output
+# Ensure commands like `npm -w auth-service ...` run from the expected workspace location.
+WORKDIR /app/apps/auth-service
+
+# Copy compiled output into the workspace folder (initContainer runs from /app/apps/auth-service)
 COPY --from=builder /app/apps/auth-service/dist ./dist
 
-# Copy Prisma schema + generated client
+# Copy Prisma schema + generated client into the workspace folder
+# K8s initContainer expects `./prisma/schema.prisma` relative to /app/apps/auth-service.
 COPY --from=builder /app/apps/auth-service/prisma ./prisma
-COPY --from=builder /app/apps/auth-service/node_modules/.prisma ./apps/auth-service/node_modules/.prisma
-COPY --from=builder /app/apps/auth-service/node_modules/.prisma/auth-service ./node_modules/.prisma/client
 
-# Copy workspace node_modules so runtime has @nestjs/platform-express (and other deps) where Node resolves it.
-COPY --from=builder /app/apps/auth-service/node_modules ./apps/auth-service/node_modules
+# Prisma Client generation in npm workspaces typically writes artifacts under the repo-root node_modules.
+# Copy both the generated client runtime (.prisma) and the @prisma packages from the root.
+COPY --from=builder /app/node_modules/.prisma /app/apps/auth-service/node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma /app/apps/auth-service/node_modules/@prisma
+
+# Copy workspace node_modules so runtime has deps where Node resolves it.
+COPY --from=builder /app/apps/auth-service/node_modules ./node_modules
 
 # Copy compiled contracts output required at runtime
-COPY --from=builder /app/packages/contracts/dist ./node_modules/@outbib/contracts/dist
-COPY --from=builder /app/packages/contracts/package.json ./node_modules/@outbib/contracts/package.json
+COPY --from=builder /app/packages/contracts/dist /app/node_modules/@outbib/contracts/dist
+COPY --from=builder /app/packages/contracts/package.json /app/node_modules/@outbib/contracts/package.json
 
 EXPOSE 3000
 CMD ["node","dist/main.js"]

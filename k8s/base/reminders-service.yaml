@@ -14,8 +14,21 @@ spec:
         app: reminders-service
     spec:
       initContainers:
+        - name: generate
+          image: outbib-reminders-service:dev-20260204-1102
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: outbib-config
+            - secretRef:
+                name: outbib-secrets
+          command:
+            - sh
+            - -lc
+            - |
+              npm -w reminders-service run prisma:generate
         - name: migrate
-          image: outbib-reminders-service:dev
+          image: outbib-reminders-service:dev-20260204-1102
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
@@ -28,7 +41,7 @@ spec:
           command: ["sh", "-lc", "npm -w reminders-service run prisma:migrate:deploy"]
       containers:
         - name: reminders-service
-          image: outbib-reminders-service:dev
+          image: outbib-reminders-service:dev-20260204-1102
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000

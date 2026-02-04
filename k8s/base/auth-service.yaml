@@ -14,8 +14,21 @@ spec:
         app: auth-service
     spec:
       initContainers:
+        - name: generate
+          image: outbib-auth-service:dev-20260204-0930
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: outbib-config
+            - secretRef:
+                name: outbib-secrets
+          command:
+            - sh
+            - -lc
+            - |
+              npm -w auth-service run prisma:generate
         - name: migrate
-          image: outbib-auth-service:dev
+          image: outbib-auth-service:dev-20260204-0930
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
@@ -25,10 +38,15 @@ spec:
           env:
             - name: DATABASE_URL
               value: "postgresql://outbib:outbib@postgres:5432/outbib_auth"
-          command: ["sh", "-lc", "npm -w auth-service run prisma:migrate:deploy"]
+          command:
+            - sh
+            - -lc
+            - |
+              cd /app/apps/auth-service \
+              && npm run prisma:migrate:deploy -- --schema=./prisma/schema.prisma
       containers:
         - name: auth-service
-          image: outbib-auth-service:dev
+          image: outbib-auth-service:dev-20260204-0930
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000

@@ -20,6 +20,8 @@ export class MapsService {
       return [];
     }
 
+    const fallbackCity = this.extractCityFromQuery(query);
+
     // Using Google Places Text Search API
     const url = `https://maps.googleapis.com/maps/api/place/textsearch/json`;
     
@@ -42,18 +44,23 @@ export class MapsService {
       }
 
       // Map the raw Google data to your strict Schema
-      return response.data.results.map((place) => ({
+      return response.data.results.map((place) => {
+        const extractedCity = this.extractCity(place.formatted_address);
+        const city = extractedCity === 'Unknown' && fallbackCity ? fallbackCity : extractedCity;
+
+        return {
         googlePlaceId: place.place_id,
         name: place.name,
         address: place.formatted_address,
-        city: this.extractCity(place.formatted_address),
+        city,
         latitude: place.geometry.location.lat,
         longitude: place.geometry.location.lng,
         // Optional fields
         rating: place.rating || 0,
         reviewCount: place.user_ratings_total || 0,
         openingHours: place.opening_hours || {}, 
-      }));
+      };
+    });
 
     } catch (error) {
       this.logger.error('Failed to fetch from Maps', error);
@@ -69,5 +76,13 @@ export class MapsService {
     if (address.includes('Marrakech')) return 'Marrakech';
     if (address.includes('Tangier')) return 'Tangier';
     return 'Unknown';
+  }
+
+  private extractCityFromQuery(query: string): string | null {
+    if (!query) return null;
+    const parts = query.split(' in ');
+    if (parts.length < 2) return null;
+    const city = parts[parts.length - 1]?.trim();
+    return city ? city : null;
   }
 }

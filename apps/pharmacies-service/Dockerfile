@@ -35,9 +35,11 @@ COPY --from=builder /app/apps/pharmacies-service/dist ./dist
 # Copy Prisma schema for migrate container usage
 COPY --from=builder /app/apps/pharmacies-service/prisma ./apps/pharmacies-service/prisma
 
-# Copy Prisma generated client for runtime resolution
-COPY --from=builder /app/apps/pharmacies-service/node_modules/.prisma ./apps/pharmacies-service/node_modules/.prisma
-COPY --from=builder /app/apps/pharmacies-service/node_modules/.prisma/pharmacies-service ./node_modules/.prisma/client
+# Copy Prisma generated client for runtime resolution (root + workspace)
+COPY --from=builder /app/apps/pharmacies-service/node_modules/.prisma /app/node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma /app/node_modules/@prisma
+COPY --from=builder /app/node_modules/.prisma /app/apps/pharmacies-service/node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma /app/apps/pharmacies-service/node_modules/@prisma
 
 # Copy workspace node_modules so runtime resolution works
 COPY --from=builder /app/apps/pharmacies-service/node_modules ./apps/pharmacies-service/node_modules
