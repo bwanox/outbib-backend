@@ -101,7 +101,7 @@ jobs:
           build-args: ${{ matrix.build_args }}
 
   deploy-k8s:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: build-and-push
     steps:
       - name: Checkout
@@ -110,27 +110,17 @@ jobs:
       - name: Set up kubeconfig
         shell: bash
         run: |
-          if [ -z "${KUBECONFIG_BASE64:-}" ]; then
-            echo "KUBECONFIG_BASE64 not set; skipping deploy."
-            exit 0
-          fi
           mkdir -p "$HOME/.kube"
-          echo "${KUBECONFIG_BASE64}" | base64 -d > "$HOME/.kube/config"
-        env:
-          KUBECONFIG_BASE64: ${{ secrets.KUBECONFIG_BASE64 }}
+          if [ -n "${KUBECONFIG_BASE64:-}" ]; then
+            echo "${KUBECONFIG_BASE64}" | base64 -d > "$HOME/.kube/config"
+          fi
 
       - name: Apply manifests with git-sha tags
         shell: bash
         run: |
-          if [ -z "${KUBECONFIG_BASE64:-}" ]; then
-            echo "KUBECONFIG_BASE64 not set; skipping deploy."
-            exit 0
-          fi
           TMP_DIR="$(mktemp -d)"
           cp -R k8s/base/* "$TMP_DIR/"
           for svc in auth users reminders doctors pharmacies ai api-gateway emergencies; do
             sed -i "s|ghcr.io/bwanox/outbib-${svc}:git-sha|ghcr.io/bwanox/outbib-${svc}:${GITHUB_SHA}|g" "$TMP_DIR"/*.yaml
           done
           kubectl apply -f "$TMP_DIR"
-        env:
-          KUBECONFIG_BASE64: ${{ secrets.KUBECONFIG_BASE64 }}
