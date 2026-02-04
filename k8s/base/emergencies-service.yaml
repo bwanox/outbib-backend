@@ -13,9 +13,11 @@ spec:
       labels:
         app: emergencies-service
     spec:
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: emergencies-service
-          image: outbib-emergencies-service:dev
+          image: ghcr.io/bwanox/outbib-emergencies-service:git-sha
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000

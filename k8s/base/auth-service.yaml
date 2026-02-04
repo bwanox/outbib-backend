@@ -13,9 +13,11 @@ spec:
       labels:
         app: auth-service
     spec:
+      imagePullSecrets:
+        - name: ghcr-pull
       initContainers:
         - name: generate
-          image: outbib-auth-service:dev-20260204-0930
+          image: ghcr.io/bwanox/outbib-auth-service:git-sha
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
@@ -28,7 +30,7 @@ spec:
             - |
               npm -w auth-service run prisma:generate
         - name: migrate
-          image: outbib-auth-service:dev-20260204-0930
+          image: ghcr.io/bwanox/outbib-auth-service:git-sha
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
@@ -46,7 +48,7 @@ spec:
               && npm run prisma:migrate:deploy -- --schema=./prisma/schema.prisma
       containers:
         - name: auth-service
-          image: outbib-auth-service:dev-20260204-0930
+          image: ghcr.io/bwanox/outbib-auth-service:git-sha
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000

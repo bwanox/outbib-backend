@@ -13,9 +13,11 @@ spec:
       labels:
         app: api-gateway
     spec:
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: api-gateway
-          image: outbib-api-gateway:dev
+          image: ghcr.io/bwanox/outbib-api-gateway:git-sha
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000

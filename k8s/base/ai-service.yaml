@@ -13,9 +13,11 @@ spec:
       labels:
         app: ai-service
     spec:
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: ai-service
-          image: outbib-ai-service:dev-20260204-1655
+          image: ghcr.io/bwanox/outbib-ai-service:git-sha
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000

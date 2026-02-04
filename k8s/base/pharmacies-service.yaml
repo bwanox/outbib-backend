@@ -13,9 +13,11 @@ spec:
       labels:
         app: pharmacies-service
     spec:
+      imagePullSecrets:
+        - name: ghcr-pull
       initContainers:
         - name: generate
-          image: outbib-pharmacies-service:dev-20260204-1633
+          image: ghcr.io/bwanox/outbib-pharmacies-service:git-sha
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
@@ -28,7 +30,7 @@ spec:
             - |
               npx prisma generate --schema=/app/apps/pharmacies-service/prisma/schema.prisma
         - name: migrate
-          image: outbib-pharmacies-service:dev-20260204-1633
+          image: ghcr.io/bwanox/outbib-pharmacies-service:git-sha
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
@@ -45,7 +47,7 @@ spec:
               npx prisma migrate deploy --schema=/app/apps/pharmacies-service/prisma/schema.prisma
       containers:
         - name: pharmacies-service
-          image: outbib-pharmacies-service:dev-20260204-1633
+          image: ghcr.io/bwanox/outbib-pharmacies-service:git-sha
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000

@@ -1,0 +1,76 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api-gateway-pdb
+  namespace: outbib
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: api-gateway
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: auth-service-pdb
+  namespace: outbib
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: auth-service
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: users-service-pdb
+  namespace: outbib
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: users-service
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: doctors-service-pdb
+  namespace: outbib
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: doctors-service
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pharmacies-service-pdb
+  namespace: outbib
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: pharmacies-service
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: reminders-service-pdb
+  namespace: outbib
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: reminders-service
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ai-service-pdb
+  namespace: outbib
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: ai-service
