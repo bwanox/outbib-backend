@@ -1,0 +1,127 @@
+name: build-and-deploy
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+    tags: [ "v*" ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version tag (e.g., v0.4.2). Leave empty to skip."
+        required: false
+        default: ""
+      publish_latest:
+        description: "Also push :latest (dev only)"
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/bwanox
+  SHA_TAG: ${{ github.sha }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: auth-service
+            image: outbib-auth-service
+            dockerfile: outbib-backend/apps/auth-service/Dockerfile
+            context: outbib-backend
+          - name: users-service
+            image: outbib-users-service
+            dockerfile: outbib-backend/apps/users-service/Dockerfile
+            context: outbib-backend
+          - name: reminders-service
+            image: outbib-reminders-service
+            dockerfile: outbib-backend/apps/reminders-service/Dockerfile
+            context: outbib-backend
+          - name: doctors-service
+            image: outbib-doctors-service
+            dockerfile: outbib-backend/Dockerfile
+            context: outbib-backend
+            build_args: APP_NAME=doctors-service
+          - name: pharmacies-service
+            image: outbib-pharmacies-service
+            dockerfile: outbib-backend/apps/pharmacies-service/Dockerfile
+            context: outbib-backend
+          - name: ai-service
+            image: outbib-ai-service
+            dockerfile: outbib-backend/apps/ai-service/Dockerfile
+            context: outbib-backend
+          - name: api-gateway
+            image: outbib-api-gateway
+            dockerfile: outbib-backend/apps/api-gateway/Dockerfile
+            context: outbib-backend
+          - name: emergencies-service
+            image: outbib-emergencies-service
+            dockerfile: outbib-backend/apps/emergencies-service/Dockerfile
+            context: outbib-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build tags list
+        id: tags
+        shell: bash
+        run: |
+          TAGS="${IMAGE_PREFIX}/${{ matrix.image }}:${SHA_TAG}"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then
+            TAGS="${TAGS},${IMAGE_PREFIX}/${{ matrix.image }}:${GITHUB_REF_NAME}"
+          fi
+          if [[ "${GITHUB_REF_NAME}" == "develop" || "${{ inputs.publish_latest }}" == "true" ]]; then
+            TAGS="${TAGS},${IMAGE_PREFIX}/${{ matrix.image }}:latest"
+          fi
+          if [[ -n "${{ inputs.version }}" ]]; then
+            TAGS="${TAGS},${IMAGE_PREFIX}/${{ matrix.image }}:${{ inputs.version }}"
+          fi
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: ${{ matrix.build_args }}
+
+  deploy-k8s:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: ${{ secrets.KUBECONFIG_BASE64 != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up kubeconfig
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "${KUBECONFIG_BASE64}" | base64 -d > "$HOME/.kube/config"
+        env:
+          KUBECONFIG_BASE64: ${{ secrets.KUBECONFIG_BASE64 }}
+
+      - name: Apply manifests with git-sha tags
+        shell: bash
+        run: |
+          TMP_DIR="$(mktemp -d)"
+          cp -R outbib-backend/k8s/base/* "$TMP_DIR/"
+          for svc in auth users reminders doctors pharmacies ai api-gateway emergencies; do
+            sed -i "s|ghcr.io/bwanox/outbib-${svc}:git-sha|ghcr.io/bwanox/outbib-${svc}:${GITHUB_SHA}|g" "$TMP_DIR"/*.yaml
+          done
+          kubectl apply -f "$TMP_DIR"
