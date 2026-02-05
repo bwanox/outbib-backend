@@ -237,6 +237,37 @@ This script:
 
 ---
 
+## 8. CI/CD (GHCR + Local Kubernetes)
+
+This repo uses GitHub Actions to build and push images to GHCR with three tags:
+
+| Tag | Purpose | Used where |
+| --- | --- | --- |
+| `:git-sha` | Exact commit version | Kubernetes deployments |
+| `:vX.Y.Z` | Human-readable release | Releases & rollbacks |
+| `:latest` | Most recent build | Local dev only |
+
+### Local kind cluster (self-hosted runner)
+
+For local kind/minikube, GitHub-hosted runners cannot reach your cluster.
+Use a **self-hosted runner** on the same machine:
+
+1) Add a runner in GitHub: **Settings → Actions → Runners → New self-hosted runner**  
+2) Run the provided `./config.sh` command on your machine  
+3) Keep the runner running (or install it as a service)
+
+The workflow will:
+* Build and push images to GHCR
+* Replace `:git-sha` in manifests with the real commit SHA
+* Apply manifests to your local cluster
+
+### Remote cluster (optional)
+
+If you deploy to a remote cluster, add `KUBECONFIG_BASE64` to repo secrets and
+run the deploy job from GitHub-hosted runners.
+
+---
+
 ## 8. Stopping / Resetting
 
 ### Stop everything
