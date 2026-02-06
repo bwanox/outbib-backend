@@ -14,6 +14,8 @@ lerna-debug.log*
 /build/
 /.next/
 /out/
+**/dist/
+**/build/
 
 # Local env files
 .env
@@ -32,3 +34,4 @@ coverage/
 
 # Misc
 *.tsbuildinfo
+actions-runner/
