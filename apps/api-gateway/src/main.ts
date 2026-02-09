@@ -40,6 +40,8 @@ async function bootstrap() {
 
   // Health endpoint for probes
   app.getHttpAdapter().get("/health", (_req: any, res: any) => res.json({ status: "ok" }));
+  // Option A: support /api prefix used by frontend clients
+  app.getHttpAdapter().get("/api/health", (_req: any, res: any) => res.json({ status: "ok" }));
 
   const proxyErrorHandler = (serviceName: string) => (err: any, req: any, res: any) => {
     const statusCode = 502;
@@ -118,8 +120,13 @@ async function bootstrap() {
   // Proxy routes
   app.use('/auth', createProxyMiddleware(authProxyOptions(AUTH_URL, 'auth-service')));
   app.use('/api/auth', createProxyMiddleware(authProxyOptions(AUTH_URL, 'auth-service')));
+
   app.use('/users', createProxyMiddleware(usersProxyOptions(USERS_URL, 'users-service')));
+  app.use('/api/users', createProxyMiddleware(usersProxyOptions(USERS_URL, 'users-service')));
+
   app.use('/doctors', createProxyMiddleware(doctorsProxyOptions(DOCTORS_URL, 'doctors-service')));
+  app.use('/api/doctors', createProxyMiddleware(doctorsProxyOptions(DOCTORS_URL, 'doctors-service')));
+
   // Pharmacies service expects `/pharmacies/*` paths (controller is mounted under `/pharmacies`).
   // Add `/pharmacies` back after Express strips the mount path.
   const pharmaciesProxyOptions = (target: string, serviceName: string) =>
@@ -131,8 +138,14 @@ async function bootstrap() {
     }) as any;
 
   app.use('/pharmacies', createProxyMiddleware(pharmaciesProxyOptions(PHARMACIES_URL, 'pharmacies-service')));
+  app.use('/api/pharmacies', createProxyMiddleware(pharmaciesProxyOptions(PHARMACIES_URL, 'pharmacies-service')));
+
   app.use('/reminders', createProxyMiddleware(remindersProxyOptions(REMINDERS_URL, 'reminders-service')));
+  app.use('/api/reminders', createProxyMiddleware(remindersProxyOptions(REMINDERS_URL, 'reminders-service')));
+
   app.use('/emergencies', createProxyMiddleware(proxyOptions(EMERGENCIES_URL, 'emergencies', 'emergencies-service')));
+  app.use('/api/emergencies', createProxyMiddleware(proxyOptions(EMERGENCIES_URL, 'emergencies', 'emergencies-service')));
+
   const aiTimeoutMs = Number(env("AI_PROXY_TIMEOUT_MS", "8000"));
   const aiRetries = Math.max(0, Number(env("AI_PROXY_RETRIES", "1")));
 
