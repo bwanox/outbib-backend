@@ -56,6 +56,10 @@ COPY --from=builder /app/apps/auth-service/dist ./dist
 # K8s initContainer expects `./prisma/schema.prisma` relative to /app/apps/auth-service.
 COPY --from=builder /app/apps/auth-service/prisma ./prisma
 
+# Ensure prisma migrations are present for `prisma migrate deploy`
+# (without this, deploy will say "No migration found in prisma/migrations" and tables won't be created)
+COPY --from=builder /app/apps/auth-service/prisma/migrations ./prisma/migrations
+
 # Prisma Client generation in npm workspaces typically writes artifacts under the repo-root node_modules.
 # Copy both the generated client runtime (.prisma) and the @prisma packages from the root.
 COPY --from=builder /app/node_modules/.prisma /app/apps/auth-service/node_modules/.prisma
