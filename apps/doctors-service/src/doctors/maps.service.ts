@@ -7,12 +7,15 @@ import { CreateDoctorDto } from './dto/create-doctor.dto';
 @Injectable()
 export class MapsService {
   private readonly logger = new Logger(MapsService.name);
-  private readonly apiKey = this.configService.get<string>('GOOGLE_MAPS_API_KEY');
 
   constructor(
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
   ) {}
+
+  private get apiKey(): string | undefined {
+    return this.configService.get<string>('GOOGLE_MAPS_API_KEY');
+  }
 
   async searchDoctors(query: string): Promise<CreateDoctorDto[]> {
     if (!this.apiKey) {

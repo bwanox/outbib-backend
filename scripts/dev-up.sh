@@ -85,4 +85,4 @@ kubectl rollout status deploy/api-gateway -n "$NS"
 
 echo "✅ Done. Add to /etc/hosts once:"
 echo "127.0.0.1 outbib.local"
-echo "Test: curl http://outbib.local/health"
+echo "Test: curl http://outbib.local:18081/health"
