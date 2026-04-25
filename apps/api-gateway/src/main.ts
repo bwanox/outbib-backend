@@ -62,27 +62,35 @@ async function bootstrap() {
       onError: proxyErrorHandler(serviceName),
     }) as any;
 
-  // Users service expects `/users/*` paths (controller is mounted under `/users`).
-  // Add `/users` back after Express strips the mount path.
+  // Users service exposes /health at root and app routes under /users/*.
+  // So we rewrite paths to prepend /users (except for health).
   const usersProxyOptions = (target: string, serviceName: string) =>
     ({
       target,
       changeOrigin: true,
-      pathRewrite: (path: string) => `/users${path}`,
+      pathRewrite: (path: string) => {
+        if (path === '/health' || path === '/healthz') return '/health';
+        return `/users${path}`;
+      },
       onError: proxyErrorHandler(serviceName),
     }) as any;
 
-  // Reminders service exposes multiple controllers:
-  // - /reminders/* (RemindersController)
-  // - /calendar/* (CalendarController)
-  // - /trackers/* (TrackersController)
-  // The gateway mounts at /reminders, so strip that prefix for calendar/trackers,
-  // and add it back for reminders routes.
+  // Reminders service exposes multiple controllers at ROOT:
+  // - /health
+  // - /reminders/*
+  // - /calendar/*
+  // - /trackers/*
+  // The gateway mounts everything under /reminders, so we must:
+  // - forward /reminders/calendar/*  -> /calendar/*
+  // - forward /reminders/trackers/*  -> /trackers/*
+  // - forward /reminders/health      -> /health
+  // - forward /reminders/* (other)   -> /reminders/*
   const remindersProxyOptions = (target: string, serviceName: string) =>
     ({
       target,
       changeOrigin: true,
       pathRewrite: (path: string) => {
+        if (path === '/health') return '/health';
         if (path.startsWith('/trackers') || path.startsWith('/calendar')) return path;
         return `/reminders${path}`;
       },
@@ -98,26 +106,58 @@ async function bootstrap() {
       onError: proxyErrorHandler(serviceName),
     }) as any;
 
-  // Auth controllers are mounted under `/auth`, but Express strips the mount path.
-  // Add `/auth` back before proxying.
+  // Auth service exposes /health at root and app routes under /auth/*.
+  // So we rewrite paths to prepend /auth (except for health).
   const authProxyOptions = (target: string, serviceName: string) =>
     ({
       target,
       changeOrigin: true,
-      pathRewrite: (path: string) => `/auth${path}`,
+      pathRewrite: (path: string) => {
+        if (path === '/health' || path === '/healthz') return '/health';
+        return `/auth${path}`;
+      },
       onError: proxyErrorHandler(serviceName),
     }) as any;
 
-  // Doctors service expects `/doctors/*` paths (controller is mounted under `/doctors`).
+  // Doctors service exposes /health at root and app routes under /doctors/*.
+  // The gateway mounts at /doctors, so:
+  // - /doctors/health -> /health
+  // - /doctors/* (other) -> /doctors/*
   const doctorsProxyOptions = (target: string, serviceName: string) =>
     ({
       target,
       changeOrigin: true,
-      pathRewrite: (path: string) => `/doctors${path}`,
+      pathRewrite: (path: string) => {
+        if (path === '/health') return '/health';
+        return `/doctors${path}`;
+      },
       onError: proxyErrorHandler(serviceName),
     }) as any;
 
+  // Explicit health aliases (some downstream services expose health at root, while the gateway groups them by service).
+  // IMPORTANT: register these BEFORE mounting /users,/doctors,/pharmacies,/reminders proxies, otherwise `app.use('/users', ...)`
+  // will capture `/users/health` first and the alias routes will never run.
+  // Use relative redirects so they work consistently behind Ingress.
+  app.getHttpAdapter().get('/users/health', (_req: any, res: any) => res.redirect('healthz'));
+  app.getHttpAdapter().get('/users/healthz', createProxyMiddleware({ target: USERS_URL, changeOrigin: true, pathRewrite: () => '/health', onError: proxyErrorHandler('users-service') } as any));
+
+  app.getHttpAdapter().get('/doctors/health', (_req: any, res: any) => res.redirect('healthz'));
+  app.getHttpAdapter().get('/doctors/healthz', createProxyMiddleware({ target: DOCTORS_URL, changeOrigin: true, pathRewrite: () => '/health', onError: proxyErrorHandler('doctors-service') } as any));
+
+  app.getHttpAdapter().get('/pharmacies/health', (_req: any, res: any) => res.redirect('healthz'));
+  app.getHttpAdapter().get('/pharmacies/healthz', createProxyMiddleware({ target: PHARMACIES_URL, changeOrigin: true, pathRewrite: () => '/health', onError: proxyErrorHandler('pharmacies-service') } as any));
+
+  app.getHttpAdapter().get('/reminders/health', (_req: any, res: any) => res.redirect('healthz'));
+  app.getHttpAdapter().get('/reminders/healthz', createProxyMiddleware({ target: REMINDERS_URL, changeOrigin: true, pathRewrite: () => '/health', onError: proxyErrorHandler('reminders-service') } as any));
+
+  app.getHttpAdapter().get('/api/users/health', (_req: any, res: any) => res.redirect('/users/health'));
+  app.getHttpAdapter().get('/api/doctors/health', (_req: any, res: any) => res.redirect('/doctors/health'));
+  app.getHttpAdapter().get('/api/pharmacies/health', (_req: any, res: any) => res.redirect('/pharmacies/health'));
+  app.getHttpAdapter().get('/api/reminders/health', (_req: any, res: any) => res.redirect('/reminders/health'));
+
   // Proxy routes
+  // NOTE: define proxy middlewares BEFORE Nest route handling so gateway paths don't fall through to Nest 404s.
+
   app.use('/auth', createProxyMiddleware(authProxyOptions(AUTH_URL, 'auth-service')));
   app.use('/api/auth', createProxyMiddleware(authProxyOptions(AUTH_URL, 'auth-service')));
 
@@ -127,13 +167,18 @@ async function bootstrap() {
   app.use('/doctors', createProxyMiddleware(doctorsProxyOptions(DOCTORS_URL, 'doctors-service')));
   app.use('/api/doctors', createProxyMiddleware(doctorsProxyOptions(DOCTORS_URL, 'doctors-service')));
 
-  // Pharmacies service expects `/pharmacies/*` paths (controller is mounted under `/pharmacies`).
-  // Add `/pharmacies` back after Express strips the mount path.
+  // Pharmacies service exposes /health at root and app routes under /pharmacies/*.
+  // The gateway mounts at /pharmacies, so:
+  // - /pharmacies/health -> /health
+  // - /pharmacies/* (other) -> /pharmacies/*
   const pharmaciesProxyOptions = (target: string, serviceName: string) =>
     ({
       target,
       changeOrigin: true,
-      pathRewrite: (path: string) => `/pharmacies${path}`,
+      pathRewrite: (path: string) => {
+        if (path === '/health' || path === '/healthz') return '/health';
+        return `/pharmacies${path}`;
+      },
       onError: proxyErrorHandler(serviceName),
     }) as any;
 
@@ -151,7 +196,10 @@ async function bootstrap() {
 
   app.use('/ai', json({ limit: '1mb' }));
   app.use('/ai', async (req: any, res: any) => {
-    const targetUrl = `${AI_URL}${req.originalUrl || req.url}`;
+    // Express strips the mount path (/ai). Using req.originalUrl would include `/ai` again.
+    // ai-service routes are mounted under `/ai`, so add exactly one `/ai` prefix.
+    const upstreamPath = req.url || '/';
+    const targetUrl = `${AI_URL}/ai${upstreamPath}`;
 
     const method = (req.method || 'GET').toUpperCase();
     const hasBody = !['GET', 'HEAD'].includes(method);

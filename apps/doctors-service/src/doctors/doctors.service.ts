@@ -2,7 +2,6 @@ import { Injectable, NotFoundException, ConflictException, Logger } from '@nestj
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateDoctorDto } from './dto/create-doctor.dto';
 import { UpdateDoctorDto } from './dto/update-doctor.dto';
-import { DoctorStatus } from '@prisma/client';
 import { MapsService } from './maps.service';
 import { ConfigService } from '@nestjs/config';
 
@@ -27,7 +26,8 @@ export class DoctorsService {
     return this.prisma.doctor.create({
       data: {
         ...createDoctorDto,
-        status: DoctorStatus.UNCLAIMED,
+        // Avoid relying on a generated enum export that can differ by Prisma/client generation.
+        status: 'UNCLAIMED' as any,
       },
     });
   }
@@ -91,7 +91,7 @@ export class DoctorsService {
   async claim(id: string, ownerId: string) {
     return this.prisma.doctor.update({
       where: { id },
-      data: { status: DoctorStatus.PENDING, ownerId },
+      data: { status: 'PENDING' as any, ownerId },
     });
   }
 

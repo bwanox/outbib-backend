@@ -249,6 +249,73 @@ This repo uses GitHub Actions to build and push images to GHCR with three tags:
 
 ### Local kind cluster (self-hosted runner)
 
+---
+
+## 9. Frontend Integration Guide
+
+This section describes how frontend developers can connect to the backend services.
+
+### 9.1 Base URL & Host Header
+
+For local development, the backend is exposed via an NGINX Ingress Controller.
+
+- **Base URL**: `http://outbib.local`
+- **Port**: `18081` (Standard for the local Kind setup)
+- **Host Header**: `outbib.local`
+
+**Example Request (Curl):**
+```bash
+curl -H "Host: outbib.local" http://localhost:18081/health
+```
+
+**Example Request (JavaScript/Fetch):**
+```javascript
+const response = await fetch('http://localhost:18081/health', {
+  headers: {
+    'Host': 'outbib.local'
+  }
+});
+```
+
+*Note: If you have updated your `/etc/hosts` file as per section 5.3, you can simply use `http://outbib.local:18081/` directly.*
+
+### 9.2 Authentication Flow
+
+1. **Sign Up**: `POST /api/auth/register`
+   - Payload: `{"email": "user@example.com", "password": "Password123!"}`
+2. **Sign In**: `POST /api/auth/login`
+   - Payload: `{"email": "user@example.com", "password": "Password123!"}`
+   - Returns: `{"accessToken": "...", "refreshToken": "..."}`
+3. **Authorized Requests**: Include the `accessToken` in the `Authorization` header.
+   - Header: `Authorization: Bearer <accessToken>`
+
+### 9.3 Key Endpoints
+
+| Service | Action | Method | Path | Auth Required |
+| :--- | :--- | :--- | :--- | :--- |
+| **Gateway** | Health Check | `GET` | `/health` | No |
+| **Auth** | Register | `POST` | `/api/auth/register` | No |
+| **Auth** | Login | `POST` | `/api/auth/login` | No |
+| **Users** | Get Profile | `GET` | `/users/me` | Yes |
+| **Users** | Update Profile | `PATCH` | `/users/me` | Yes |
+| **Doctors** | Search Doctors | `GET` | `/doctors?city=Rabat` | No |
+| **Pharmacies** | List Pharmacies | `GET` | `/pharmacies?city=Rabat` | No |
+| **Reminders** | Get Reminders | `GET` | `/reminders` | Yes |
+| **AI** | Chat Assistant | `POST` | `/ai/chat` | Yes |
+
+### 9.4 Path Rewriting Logic
+
+The API Gateway handles routing to internal microservices. Most services follow a predictable pattern:
+- `/api/auth/*` -> Proxied to `auth-service`
+- `/users/*` -> Proxied to `users-service`
+- `/doctors/*` -> Proxied to `doctors-service`
+- `/pharmacies/*` -> Proxied to `pharmacies-service`
+- `/reminders/*` -> Proxied to `reminders-service`
+- `/ai/*` -> Proxied to `ai-service`
+
+All services expose a `/health` endpoint which is accessible via the gateway (e.g., `GET /api/auth/health`).
+
+
 For local kind/minikube, GitHub-hosted runners cannot reach your cluster.
 Use a **self-hosted runner** on the same machine:
 
