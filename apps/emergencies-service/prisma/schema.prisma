@@ -1,0 +1,52 @@
+generator client { 
+  provider = "prisma-client-js" 
+  output="../node_modules/@prisma/client"
+}
+
+
+datasource db { 
+  provider = "postgresql" 
+  url = env("DATABASE_URL") 
+}
+
+enum EmergencyStatus{
+  ACTIVE
+  RESOLVED
+  CANCELLED
+}
+  enum Type {
+  CARDIOLOGY        // heart attack, chest pain
+  NEUROLOGY         // stroke, seizure
+  TRAUMA            // accidents, injuries
+  ORTHOPEDIC        // fractures, broken bones
+  RESPIRATORY       // breathing issues, asthma
+  PEDIATRIC         // child emergencies
+  OBSTETRIC         // pregnancy-related
+  TOXICOLOGY        // poisoning, overdose
+  BURNS             // fire, chemical burns
+  GENERAL           // unspecified / mixed symptoms
+}
+model Emergency {
+  id        String @id @default(uuid())
+  userId    String
+  type      Type
+  status    EmergencyStatus @default(ACTIVE)
+
+  title     String
+  message   String?
+
+  latitude  Float
+  longitude Float
+
+  triggeredAt DateTime @default(now())
+
+  resolvedAt DateTime?
+
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([triggeredAt])
+}
